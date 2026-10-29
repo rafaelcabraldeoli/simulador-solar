@@ -1,0 +1,6 @@
+{
+  "name": "Simulador Astronômico Planar",
+  "description": "Simulador astronômico interativo 3D com modelo planar, relevo 3D de montanhas e mapa hipsométrico físico (verde = planície, amarelo = planaltos, vermelho = altas montanhas), estratificação de nuvens, iluminação solar dinâmica e controle temporal.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

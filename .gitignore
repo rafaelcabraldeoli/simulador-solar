@@ -1,0 +1,17 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# AI Studio user chat attachments and internal cache
+.aistudio/
+*.tempmediaStorage
+public/assets/aistudio/
+assets/aistudio/
+*.mp4
+*.webm
+*.mov
