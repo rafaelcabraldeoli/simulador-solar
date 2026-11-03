@@ -417,8 +417,8 @@ export function createAtmosphericClouds3D(scene: THREE.Scene): CloudSystem3D {
 
   // ===========================================================================
   // 3. HUMAN 1ST-PERSON VOLUMETRIC SKY DOME CLOUDS & GROUND SHADOW PROJECTION
-  // ===========================================================================
-  const humanCloudDomeGeo = new THREE.SphereGeometry(92.0, 96, 48, 0, Math.PI * 2, 0, Math.PI * 0.49);
+  // Tropospheric clouds are inside Earth atmosphere (radius 36.5 vs celestial Sun/Moon at 40.0)
+  const humanCloudDomeGeo = new THREE.SphereGeometry(36.5, 96, 48, 0, Math.PI * 2, 0, Math.PI * 0.49);
   const humanCloudUniforms: Record<string, THREE.IUniform> = {
     uTime: { value: 0.0 },
     uSunWorldPos: { value: new THREE.Vector3(0, 20, 0) },
@@ -577,7 +577,7 @@ export function createAtmosphericClouds3D(scene: THREE.Scene): CloudSystem3D {
 
         vec3 litCloud = mix(nightCloudCol, dayCloudCol, clamp(uDaylight * 1.25, 0.0, 1.0));
 
-        float alpha = density * mix(0.55, 0.92, clamp(uDaylight + uMoonIllum * 0.5 * nightOnlyMask, 0.0, 1.0));
+        float alpha = clamp(density * mix(0.70, 0.98, clamp(uDaylight + uMoonIllum * 0.5 * nightOnlyMask, 0.0, 1.0)), 0.0, 0.98);
         if (alpha < 0.008) discard;
 
         gl_FragColor = vec4(litCloud, alpha);
@@ -586,7 +586,7 @@ export function createAtmosphericClouds3D(scene: THREE.Scene): CloudSystem3D {
   });
 
   const humanCloudDomeMesh = new THREE.Mesh(humanCloudDomeGeo, humanCloudMat);
-  humanCloudDomeMesh.renderOrder = -4; // In front of background sky dome (-10) and stars, behind Sun/Moon
+  humanCloudDomeMesh.renderOrder = 15; // Tropospheric clouds pass in front of Sun and Moon (renderOrder 0-3), covering them realistically
   humanCloudDomeMesh.visible = false;
   group.add(humanCloudDomeMesh);
 
@@ -744,10 +744,10 @@ export function createAtmosphericClouds3D(scene: THREE.Scene): CloudSystem3D {
         humanCloudDomeMesh.visible = true;
         humanGroundShadowMesh.visible = false;
 
-        if (camera) {
-          humanCloudDomeMesh.position.copy(camera.position);
-        } else if (obsGround) {
+        if (obsGround) {
           humanCloudDomeMesh.position.set(obsGround.x, 0.09, obsGround.z);
+        } else if (camera) {
+          humanCloudDomeMesh.position.copy(camera.position);
         }
         if (obsGround) {
           humanGroundShadowMesh.position.set(obsGround.x, 0.0504, obsGround.z);

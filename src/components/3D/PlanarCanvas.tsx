@@ -848,18 +848,17 @@ export const PlanarCanvas: React.FC = () => {
               effectiveMoonlight = uMoonIntensity * uMoonPhaseFrac;
             }
           } else {
-            // In Global Mode: Moon illumination cone on the night-time side of the plane
+            // Em Modo Global: Iluminação difusa e natural do luar espalhada por todo o hemisfério noturno
+            // O luar real não é um holofote/lanterna estreita no chão; ele se espalha suavemente pela noite
             float distToMoon = length(vWorldPosition.xz - uMoonPos.xz);
-            if (distToMoon < uMoonRadius) {
-              float normDistMoon = distToMoon / uMoonRadius;
-              float rawMoonlight = pow(smoothstep(1.0, 0.10, normDistMoon), 1.35);
-              effectiveMoonlight = rawMoonlight * uMoonIntensity * uMoonPhaseFrac;
-            }
+            float broadNightRadius = 45.0; // Abrange o horizonte noturno visível
+            float naturalFalloff = clamp(1.0 - distToMoon / broadNightRadius, 0.0, 1.0);
+            effectiveMoonlight = pow(naturalFalloff, 1.6) * uMoonIntensity * uMoonPhaseFrac * 0.75;
           }
 
-          // Realistic subtle nocturnal moonlight tone (gentle, cold silvery-blue • preserves deep night darkness)
-          vec3 moonlightColor = vec3(0.42, 0.58, 0.85);
-          vec3 moonlightDirect = dayColor.rgb * moonlightColor * (effectiveMoonlight * 0.035);
+          // Tom realista de luar prateado/aço natural (iluminação suave refletida da lua, sem luz falsa)
+          vec3 moonlightColor = vec3(0.55, 0.68, 0.88);
+          vec3 moonlightDirect = dayColor.rgb * moonlightColor * (effectiveMoonlight * 0.022);
 
           // Illuminated nocturnal terrain with moonlight (or pitch-black if moon is absent/below horizon)
           vec3 illuminatedNightTerrain = baseNightTerrain + moonlightDirect;
@@ -1164,7 +1163,7 @@ export const PlanarCanvas: React.FC = () => {
     // Shader Material for physically-accurate dynamic solar illumination, lunar phases & progressive Lunar Eclipse (Blood Moon)
     const moonShaderMat = new THREE.ShaderMaterial({
       transparent: true,
-      depthWrite: true,
+      depthWrite: false,
       depthTest: true,
       uniforms: {
         uMoonTexture: { value: moonTex },
@@ -1268,39 +1267,70 @@ export const PlanarCanvas: React.FC = () => {
           float lum = dot(texColor.rgb, vec3(0.299, 0.587, 0.114));
           vec3 viewDir = normalize(cameraPosition - vWorldPosition);
 
-          // Lambertian & Hapke lunar regolith backscatter illumination
+          // Directional solar illumination (Lambertian cosine law for authentic 3D sphere curvature)
           float NdotL = dot(norm, sunDir);
           
-          // Realistic sharp lunar terminator (Moon lacks atmosphere)
-          float directSunlight = smoothstep(-0.015, 0.035, NdotL);
+          // Realistic sharp lunar terminator (Moon lacks atmosphere to scatter light into shadow)
+          float directSunlight = smoothstep(-0.01, 0.04, NdotL);
+          float diffuse = pow(max(0.0, NdotL), 0.85);
 
-          // Hapke/Oren-Nayar regolith retro-reflection curve
-          float regolithBrilliance = pow(clamp(NdotL + 0.08, 0.0, 1.0), 0.72) * 1.35 * uSunlightIntensity;
+          // Sunlight color and intensity
+          vec3 sunColor = vec3(1.0, 0.985, 0.95);
+          float solarIntensity = uSunlightIntensity > 0.1 ? uSunlightIntensity : 1.85;
 
-          // Normal lit hemisphere: Silvery-white mineral moonscape at night, chalky alabaster pale-white in daytime blue sky
-          float ndotv = max(0.0, dot(norm, viewDir));
-          float lommelSeeliger = max(0.0, NdotL) / max(0.14, max(0.0, NdotL) + ndotv * 0.65);
-          float flatLimbBrilliance = mix(regolithBrilliance, lommelSeeliger * 1.45 * uSunlightIntensity, 0.58);
+          // Opposition surge / retroreflective regolith sheen (Hapke effect):
+          // Lunar dust brightens towards the light source with authentic limb radiance
+          vec3 halfVec = normalize(sunDir + viewDir);
+          float NdotH = clamp(dot(norm, halfVec), 0.0, 1.0);
+          float opposition = pow(NdotH, 10.0) * 0.35 * directSunlight;
+          float limbSheen = pow(1.0 - clamp(dot(norm, viewDir), 0.0, 1.0), 3.5) * diffuse * 0.30;
 
-          vec3 nightLitColor = texColor.rgb * (vec3(1.08, 1.10, 1.14) + flatLimbBrilliance * 0.42);
-          // Lua realista no céu diurno: preserva o contraste de mares/crateras e nunca satura como um segundo sol
-          vec3 dayChalkWhite = mix(vec3(0.66, 0.78, 0.92), vec3(0.88, 0.92, 0.96), 0.35 + 0.65 * lum);
-          vec3 dayLitColor = dayChalkWhite * (0.65 + 0.35 * clamp(flatLimbBrilliance * 0.45, 0.0, 1.0));
-          vec3 mineralLitColor = mix(nightLitColor, dayLitColor, uDaylightFactor * uIsHuman);
+          // Lit reflection factor: authentic lunar surface radiance reflecting solar irradiance
+          float litReflectance = (diffuse * 1.55 + opposition + limbSheen) * solarIntensity * 0.75;
 
-          // Shaded hemisphere (à noite: 100% escuro, sem nenhuma luz ou brilho próprio; de dia: lado escuro 100% transparente)
-          vec3 normalDarkSide = vec3(0.0005, 0.0005, 0.001);
-          vec3 effectiveDarkSide = mix(normalDarkSide, vec3(0.0), uDaylightFactor * uIsHuman);
+          // Daytime sky visibility rule:
+          // In broad daylight (human observer looking at the blue sky), the Moon's unlit dark side
+          // reflects NO direct sunlight and is 100% invisible/transparent against Rayleigh atmospheric scattering!
+          // We discard any fragment on the unilluminated hemisphere during the day:
+          if (uIsHuman > 0.5 && uDaylightFactor > 0.08) {
+            if (directSunlight <= 0.005) {
+              discard;
+            }
+          }
 
-          // Renderização da fase lunar autêntica: lado iluminado tem luz mineral, lado escuro é totalmente preto à noite e transparente de dia
+          // Enhanced selenographic surface contrast:
+          // Maria (dark basalt lava plains) and Highlands (anorthosite crater rays) pop realistically:
+          float mareContrast = smoothstep(0.15, 0.82, lum);
+          vec3 enhancedTexture = mix(texColor.rgb * 0.82, texColor.rgb * 1.18, mareContrast);
+
+          // Nighttime lit surface: brilliant silvery-white reflected sunlight
+          vec3 nightLitColor = enhancedTexture * sunColor * litReflectance;
+
+          // Daytime lit surface (Human view through blue atmosphere):
+          // In broad daylight, the Moon's real surface features (mares, craters) remain visible,
+          // overlaid with the blue atmospheric sky haze:
+          vec3 blueSkyTint = vec3(0.50, 0.70, 0.94);
+          vec3 daytimeAlbedo = enhancedTexture * vec3(1.05, 1.02, 0.98) * (diffuse * 1.35 + 0.12);
+          vec3 dayLitColor = mix(daytimeAlbedo, blueSkyTint, 0.28 * uDaylightFactor);
+          vec3 mineralLitColor = mix(nightLitColor, dayLitColor, clamp(uDaylightFactor * uIsHuman, 0.0, 1.0));
+
+          // Shaded hemisphere (Earthshine sutilíssima no espaço / noite; transparente de dia)
+          float dayFactor = clamp(uDaylightFactor * uIsHuman, 0.0, 1.0);
+          vec3 earthshineNight = enhancedTexture * vec3(0.015, 0.018, 0.024);
+          vec3 effectiveDarkSide = mix(earthshineNight, vec3(0.0), dayFactor);
+
+          // Renderização da fase lunar autêntica
           vec3 finalColor = mix(effectiveDarkSide, mineralLitColor, directSunlight);
 
-          // Opacity handling: à noite é 100% opaco (alpha = 1.0) para que o lado escuro nunca deixe luz ou halo de trás transparecer!
-          // No céu diurno, o lado não iluminado é 100% transparente para mostrar o céu azul sem borda preta.
-          float dayFactor = clamp(uDaylightFactor * uIsHuman, 0.0, 1.0);
-          float darkSideOpacity = (1.0 - dayFactor) * (1.0 - smoothstep(0.0, 0.25, uDaylightFactor));
-          float dayLitMaxAlpha = mix(1.0, 0.75, dayFactor);
-          float alpha = mix(darkSideOpacity, dayLitMaxAlpha * smoothstep(-0.01, 0.06, directSunlight), directSunlight);
+          // Opacity handling: no espaço ou à noite é 100% opaco (alpha = 1.0)
+          // No céu diurno humano, o lado escuro não iluminado é 100% transparente para mostrar o céu azul
+          float alpha = 1.0;
+          if (uIsHuman > 0.5 && uDaylightFactor > 0.05) {
+            alpha = smoothstep(0.0, 0.04, NdotL) * mix(1.0, 0.92, uDaylightFactor);
+          }
+          if (alpha < 0.005) {
+            discard;
+          }
 
           // PROGRESSIVE LUNAR ECLIPSE / BLOOD MOON OCCULTATION:
           // Just like solar eclipse eats into the Sun disk, the Earth's umbral shadow (Ketu)
@@ -1325,7 +1355,7 @@ export const PlanarCanvas: React.FC = () => {
               // Radial disk gradient
               float diskGrad = length(diskPos);
               vec3 bloodEclipseColor = mix(bloodCoreColor, bloodLimbColor, clamp(diskGrad * 0.85, 0.0, 1.0));
-              bloodEclipseColor *= (0.78 + regolithBrilliance * 0.50);
+              bloodEclipseColor *= (0.75 + diffuse * 0.55);
 
               // Advancing penumbral contact rim (amber/warm edge at boundary)
               float rimEdge = smoothstep(uLunarObscurerRadius - 0.22, uLunarObscurerRadius, distToObs) * 
@@ -1352,7 +1382,8 @@ export const PlanarCanvas: React.FC = () => {
     moonShaderMatRef.current = moonShaderMat;
 
     const moonMesh = new THREE.Mesh(moonGeo, moonShaderMat);
-    moonMesh.renderOrder = 10;
+    moonMesh.renderOrder = 2;
+    moonGroup.renderOrder = 2;
     moonGroup.add(moonMesh);
 
     // Foco de Luz da Lua: Halo e coroa atmosférica proporcional DIRECIONAL
@@ -1424,7 +1455,7 @@ export const PlanarCanvas: React.FC = () => {
     });
     const moonHaloMesh = new THREE.Mesh(moonHaloGeo, moonHaloMat);
     moonHaloMesh.renderOrder = 5;
-    moonGroup.add(moonHaloMesh);
+    moonHaloMesh.visible = false;
     moonHaloMeshRef.current = moonHaloMesh;
     moonHaloMatRef.current = moonHaloMat;
 
@@ -1458,7 +1489,7 @@ export const PlanarCanvas: React.FC = () => {
       depthWrite: false,
     });
     const rahuMesh = new THREE.Mesh(rahuGeo, rahuMat);
-    rahuMesh.renderOrder = 10;
+    rahuMesh.renderOrder = 3;
     rahuGroup.add(rahuMesh);
 
     // Sprite billboard frontal de fumaça cósmica suave
@@ -1469,7 +1500,7 @@ export const PlanarCanvas: React.FC = () => {
       depthWrite: false,
     });
     const rahuSprite = new THREE.Sprite(rahuSpriteMat);
-    rahuSprite.renderOrder = 10;
+    rahuSprite.renderOrder = 3;
     rahuSprite.scale.set(1.22, 1.22, 1);
     rahuGroup.add(rahuSprite);
 
@@ -1488,7 +1519,7 @@ export const PlanarCanvas: React.FC = () => {
     });
     ketuMatRef.current = ketuMat;
     const ketuMesh = new THREE.Mesh(ketuGeo, ketuMat);
-    ketuMesh.renderOrder = 10;
+    ketuMesh.renderOrder = 3;
     ketuGroup.add(ketuMesh);
 
     // Sprite billboard frontal de fumaça cósmica avermelhada suave (aumentado em 100%)
@@ -1500,7 +1531,7 @@ export const PlanarCanvas: React.FC = () => {
     });
     ketuSpriteMatRef.current = ketuSpriteMat;
     const ketuSprite = new THREE.Sprite(ketuSpriteMat);
-    ketuSprite.renderOrder = 10;
+    ketuSprite.renderOrder = 3;
     ketuSprite.scale.set(1.72, 1.72, 1); // Aumentado em 100% (o dobro de 0.86)
     ketuGroup.add(ketuSprite);
 
@@ -1685,10 +1716,28 @@ export const PlanarCanvas: React.FC = () => {
     });
     planetLiveOrbitsRef.current = planetLiveMap;
 
-    // 12. Altitude Rods Group
+    // 12. Altitude Rods Group (Persistent lines to prevent GPU buffer memory leak)
     const rodsGroup = new THREE.Group();
     scene.add(rodsGroup);
     altitudeRodsGroupRef.current = rodsGroup;
+
+    const astrosRodList = ['sun', 'moon', 'mars', 'jupiter', 'saturn'] as const;
+    const persistentRodLinesMap = new Map<string, THREE.Line>();
+    astrosRodList.forEach((id) => {
+      const pts = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0)];
+      const rodGeo = new THREE.BufferGeometry().setFromPoints(pts);
+      const rodMat = new THREE.LineDashedMaterial({
+        color: id === 'sun' ? 0xfbbf24 : id === 'moon' ? 0xe2e8f0 : 0x38bdf8,
+        dashSize: 0.8,
+        gapSize: 0.4,
+        transparent: true,
+        opacity: 0.45,
+      });
+      const rodLine = new THREE.Line(rodGeo, rodMat);
+      rodLine.computeLineDistances();
+      rodsGroup.add(rodLine);
+      persistentRodLinesMap.set(id, rodLine);
+    });
 
     // 13. Observer 3D Pin & Zenith Alignment Guide
     const observerGroup = new THREE.Group();
@@ -2847,9 +2896,8 @@ export const PlanarCanvas: React.FC = () => {
           humanMoonBeamMatRef.current.uniforms.uDirectLookFade.value = directLookFadeM;
 
           const moonAltFactor = THREE.MathUtils.clamp((moonSky.altitudeDeg + 0.5) / 8.0, 0.0, 1.0);
-          const beamIntensity = 0.22 * Math.max(0.12, rawMoonPhase) * effectiveMoonIntensity * moonAltFactor;
-          humanMoonBeamMatRef.current.uniforms.uIntensity.value = beamIntensity;
-          humanMoonBeamRef.current.visible = beamIntensity > 0.002 && directLookFadeM > 0.005 && (sunSky.altitudeDeg < 2.5);
+          humanMoonBeamMatRef.current.uniforms.uIntensity.value = 0.0;
+          humanMoonBeamRef.current.visible = false;
         } else {
           humanMoonBeamMatRef.current.uniforms.uIntensity.value = 0.0;
           humanMoonBeamRef.current.visible = false;
@@ -2886,22 +2934,10 @@ export const PlanarCanvas: React.FC = () => {
         }
       }
 
-      if (moonSpotLightRef.current && moonSpotTargetRef.current) {
-        moonSpotLightRef.current.position.set(moonState.x, moonState.y, moonState.z);
-        moonSpotTargetRef.current.position.set(moonState.x, 0, moonState.z);
-        moonSpotLightRef.current.angle = THREE.MathUtils.clamp(moonAngleRad * 0.95, 0.2, 1.45);
-        moonSpotLightRef.current.intensity =
-          !isMoonLit || isFullDaylight || isHuman
-            ? 0
-            : effectiveMoonIntensity * Math.max(0.05, rawMoonPhase) * 1.5;
-
-        // In Lunar Eclipse, ground moonlight shifts into reddish copper hue
-        if (eclipseInfo.isLunarEclipseActive && eclipseInfo.lunarEclipseMagnitude > 0.05) {
-          const bloodColor = new THREE.Color(0xcfd8dc).lerp(new THREE.Color(0xb83a24), eclipseInfo.lunarEclipseMagnitude);
-          moonSpotLightRef.current.color.copy(bloodColor);
-        } else {
-          moonSpotLightRef.current.color.setHex(0xcfd8dc);
-        }
+      // Foco artificial de holofote da Lua desativado para garantir que a luz da Lua venha unicamente de seu disco refletivo real
+      if (moonSpotLightRef.current) {
+        moonSpotLightRef.current.intensity = 0;
+        moonSpotLightRef.current.visible = false;
       }
 
       // Update Earth Disc Day/Night Shader Uniforms
@@ -2988,6 +3024,21 @@ export const PlanarCanvas: React.FC = () => {
             const isMoonVisibleInHuman = moonSky.altitudeDeg >= -0.85 && (moonSky.isAboveHorizon || moonSky.altitudeDeg >= -0.5);
             moonMeshRef.current.visible = isMoonVisibleInHuman;
           }
+
+          // Bloqueio de Maré Realista (Tidal Locking):
+          // A face visível da Lua (Near Side: Mares da Tranquilidade, Imbrium, Procellarum, Tycho, em +X local)
+          // aponta SEMPRE diretamente para o observador na Terra, com o Polo Norte lunar (+Y local) alinhado para cima
+          const toObs = new THREE.Vector3(
+            obsGround.x - moonSky.position.x,
+            eyeLevelY - moonSky.position.y,
+            obsGround.z - moonSky.position.z
+          ).normalize();
+          const targetX = toObs;
+          const tempUp = new THREE.Vector3(0, 1, 0);
+          const targetZ = new THREE.Vector3().crossVectors(targetX, tempUp).normalize();
+          const targetY = new THREE.Vector3().crossVectors(targetZ, targetX).normalize();
+          const moonRotMat = new THREE.Matrix4().makeBasis(targetX, targetY, targetZ);
+          moonMeshRef.current.quaternion.setFromRotationMatrix(moonRotMat);
         } else {
           moonMeshRef.current.position.set(moonState.x, moonState.y, moonState.z);
           if (isMoonEclipsingSun) {
@@ -2997,71 +3048,25 @@ export const PlanarCanvas: React.FC = () => {
             moonMeshRef.current.scale.set(1.0, 1.0, 1.0);
           }
           moonMeshRef.current.visible = true;
+
+          // Em visão orbital global, a face visível (+X local) aponta para baixo em direção ao disco terrestre
+          const toGround = new THREE.Vector3(
+            -moonState.x * 0.25,
+            -moonState.y,
+            -moonState.z * 0.25
+          ).normalize();
+          const targetXGlobal = toGround;
+          const tempUpGlobal = new THREE.Vector3(0, 1, 0);
+          const targetZGlobal = new THREE.Vector3().crossVectors(targetXGlobal, tempUpGlobal).normalize();
+          const targetYGlobal = new THREE.Vector3().crossVectors(targetZGlobal, targetXGlobal).normalize();
+          const moonRotMatGlobal = new THREE.Matrix4().makeBasis(targetXGlobal, targetYGlobal, targetZGlobal);
+          moonMeshRef.current.quaternion.setFromRotationMatrix(moonRotMatGlobal);
         }
       }
 
-      // Atualiza o Foco de Luz Proporcional em Volta da Lua (Lunar Glow & Atmospheric Halo)
-      if (moonHaloMeshRef.current && moonHaloMatRef.current) {
-        const moonIllumRatio = (moonState?.illuminatedPct ?? 50) / 100.0;
-        const moonAltDeg = isHuman ? moonSky.altitudeDeg : 20.0;
-        const horizonFactor = THREE.MathUtils.clamp((moonAltDeg + 2.0) / 6.0, 0.0, 1.0);
-        const isEclipse = isMoonEclipsingSun || eclipseInfo.isSolarEclipseActive;
-
-        if (isEclipse) {
-          moonHaloMeshRef.current.visible = false;
-        } else {
-          // Escala do foco de luz cresce com a proporção de iluminação da Lua (Lua Cheia = foco amplo e radiante)
-          const baseScale = isHuman ? 4.2 : 3.4;
-          const dynamicScale = baseScale * (0.60 + 0.60 * moonIllumRatio);
-          moonHaloMeshRef.current.scale.set(dynamicScale, dynamicScale, 1);
-
-          // Sempre virado frontalmente para a câmera em modo billboard
-          if (cameraRef.current) {
-            moonHaloMeshRef.current.quaternion.copy(cameraRef.current.quaternion);
-
-            // Calcula o vetor 2D direcional exato apontando para o Sol no plano da tela:
-            const sunTarget = isHuman ? sunSky.position : sunState;
-            const moonTarget = isHuman ? moonSky.position : moonState;
-            _vToSun.set(
-              sunTarget.x - moonTarget.x,
-              sunTarget.y - moonTarget.y,
-              sunTarget.z - moonTarget.z
-            ).normalize();
-
-            const rightX = cameraRef.current.matrixWorld.elements[0];
-            const rightY = cameraRef.current.matrixWorld.elements[1];
-            const rightZ = cameraRef.current.matrixWorld.elements[2];
-
-            const upX = cameraRef.current.matrixWorld.elements[4];
-            const upY = cameraRef.current.matrixWorld.elements[5];
-            const upZ = cameraRef.current.matrixWorld.elements[6];
-
-            const sunScrX = _vToSun.x * rightX + _vToSun.y * rightY + _vToSun.z * rightZ;
-            const sunScrY = _vToSun.x * upX + _vToSun.y * upY + _vToSun.z * upZ;
-            const lenScr = Math.hypot(sunScrX, sunScrY);
-            if (lenScr > 0.001) {
-              moonHaloMatRef.current.uniforms.uSunDir2D.value.set(sunScrX / lenScr, sunScrY / lenScr);
-            }
-          }
-
-          moonHaloMatRef.current.uniforms.uMoonPhase.value = moonIllumRatio;
-
-          // Na Lua de Sangue (eclipse lunar), o halo fica cobre-avermelhado
-          if (eclipseInfo.isLunarEclipseActive && eclipseInfo.lunarEclipseMagnitude > 0.05) {
-            const bloodColor = new THREE.Color(0x3870cc).lerp(new THREE.Color(0xb83a24), eclipseInfo.lunarEclipseMagnitude);
-            moonHaloMatRef.current.uniforms.uColor.value.copy(bloodColor);
-          } else {
-            moonHaloMatRef.current.uniforms.uColor.value.set(0x3870cc);
-          }
-
-          // Intensidade luminosa estritamente proporcional à luz refletida pela Lua, suprimida de dia para não parecer um segundo sol
-          const daylightSuppression = 1.0 - THREE.MathUtils.clamp((daylightFactor - 0.02) / 0.12, 0.0, 1.0);
-          const targetOpacity = Math.min(0.85, (0.15 + 0.70 * moonIllumRatio) * horizonFactor * daylightSuppression);
-          moonHaloMatRef.current.uniforms.uOpacity.value = targetOpacity;
-
-          const isMoonVisibleInHuman = moonSky.altitudeDeg >= -0.85 && (moonSky.isAboveHorizon || moonSky.altitudeDeg >= -0.5);
-          moonHaloMeshRef.current.visible = isHuman ? (isMoonVisibleInHuman && targetOpacity > 0.01) : (targetOpacity > 0.01);
-        }
+      // Foco de Luz da Lua desativado para eliminar qualquer luz falsa ou halo artificial
+      if (moonHaloMeshRef.current) {
+        moonHaloMeshRef.current.visible = false;
       }
 
       // Update Moon Solar-Illumination Shader with real-time Sun position & atmospheric transparency
@@ -3518,7 +3523,8 @@ export const PlanarCanvas: React.FC = () => {
               Boolean(store.layers.showConstellationLabels),
               store.layers.constellationLineColor || 'cyan',
               store.layers.constellationLineOpacity ?? 0.85,
-              store.layers.selectedConstellation
+              store.layers.selectedConstellation,
+              false
             );
           } else {
             celestialSphere3DRef.current.update(
@@ -3625,30 +3631,24 @@ export const PlanarCanvas: React.FC = () => {
 
       // G. Update Altitude Vertical Rods (Hidden in Human 1st-person view)
       if (altitudeRodsGroupRef.current) {
-        const rods = altitudeRodsGroupRef.current;
-        rods.visible = store.layers.showAstroAltitudes && !isHuman;
+        const showRods = Boolean(store.layers.showAstroAltitudes) && !isHuman;
+        altitudeRodsGroupRef.current.visible = showRods;
 
-        if (store.layers.showAstroAltitudes && !isHuman) {
-          while (rods.children.length > 0) {
-            rods.remove(rods.children[0]);
-          }
-
-          const astros = ['sun', 'moon', 'mars', 'jupiter', 'saturn'];
-          astros.forEach(id => {
+        if (showRods) {
+          astrosRodList.forEach((id) => {
+            const rodLine = persistentRodLinesMap.get(id);
             const st = positions[id as AstroId];
-            if (!st) return;
-            const pts = [new THREE.Vector3(st.x, 0, st.z), new THREE.Vector3(st.x, st.y, st.z)];
-            const rodGeo = new THREE.BufferGeometry().setFromPoints(pts);
-            const rodMat = new THREE.LineDashedMaterial({
-              color: id === 'sun' ? 0xfbbf24 : id === 'moon' ? 0xe2e8f0 : 0x38bdf8,
-              dashSize: 0.8,
-              gapSize: 0.4,
-              transparent: true,
-              opacity: 0.45,
-            });
-            const rodLine = new THREE.Line(rodGeo, rodMat);
+            if (!rodLine) return;
+            if (!st) {
+              rodLine.visible = false;
+              return;
+            }
+            rodLine.visible = true;
+            const posAttr = rodLine.geometry.attributes.position as THREE.BufferAttribute;
+            posAttr.setXYZ(0, st.x, 0, st.z);
+            posAttr.setXYZ(1, st.x, st.y, st.z);
+            posAttr.needsUpdate = true;
             rodLine.computeLineDistances();
-            rods.add(rodLine);
           });
         }
       }
@@ -3698,10 +3698,12 @@ export const PlanarCanvas: React.FC = () => {
             ctx.fillStyle = '#38bdf8';
             ctx.fillText(`${latStr}, ${lngStr} • Zênite Solar 12:00`, 256, 92);
 
+            const oldTex = observerTagSpriteRef.current.material.map;
             const newTex = new THREE.CanvasTexture(tagCanvas);
             newTex.minFilter = THREE.LinearFilter;
             observerTagSpriteRef.current.material.map = newTex;
             observerTagSpriteRef.current.material.needsUpdate = true;
+            if (oldTex) oldTex.dispose();
           }
         }
       }

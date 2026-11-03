@@ -1076,53 +1076,8 @@ export class CelestialSphere3D {
           // 1. Céu noturno base com gradiente de horizonte (airglow sutil na base, vácuo escuro no alto)
           vec3 baseNightSky = mix(uHorizonAirglow, uVoidBlack, pow(elevation, 0.45));
 
-          // 2. Foco de Luz Proporcional em Volta da Lua (Direcional conforme a Iluminação do Sol)
-          // Distância angular exata em radianos entre o ponto do céu e a posição da Lua
-          float moonCos = clamp(dot(dir, uMoonDirection), -1.0, 1.0);
-          float angleRad = acos(moonCos);
-
-          // Vetores projetados no plano tangente da abóbada celeste ao redor da Lua
-          vec3 toSkyFromMoon = dir - uMoonDirection * moonCos;
-          vec3 toSunFromMoon = uSunDirection - uMoonDirection * dot(uSunDirection, uMoonDirection);
-          float lenSky = length(toSkyFromMoon);
-          float lenSun = length(toSunFromMoon);
-          float moonSunAlignment = (lenSky > 0.0005 && lenSun > 0.0005) ? dot(toSkyFromMoon, toSunFromMoon) / (lenSky * lenSun) : 1.0;
-
-          // O lado escuro / preto da Lua NÃO PODE ter luz, brilho ou halo no céu ao seu redor:
-          // A luz e o halo circumlunar só emanam do lado iluminado (apontado para o Sol)!
-          // uMoonLight varia de 0.0 (Nova) a 1.0 (Cheia):
-          float phaseThresh = (0.5 - uMoonLight) * 2.2;
-          float atmoDirMask = smoothstep(phaseThresh - 0.25, phaseThresh + 0.35, moonSunAlignment);
-          float atmoFullBlend = smoothstep(0.88, 0.98, uMoonLight);
-          float lunarSideFactor = mix(atmoDirMask, 1.0, atmoFullBlend);
-
-          // Foco concêntrico estritamente no lado iluminado:
-          // - Núcleo radiante luminoso imediatamente ao redor do disco lunar (0° a 8°)
-          float coreFocus = exp(-angleRad * 9.5) * lunarSideFactor;
-          // - Halo circumlunar em azul marinho vibrante e rico (8° a 28°)
-          float haloNavyFocus = exp(-angleRad * 3.8) * mix(0.08, 1.0, lunarSideFactor);
-          // - Difusão atmosférica suave de transição (28° a 65°)
-          float wideTransition = exp(-angleRad * 1.6) * 0.45 * mix(0.25, 1.0, lunarSideFactor);
-
-          // Intensidade do foco de luz da Lua (desligado durante o dia para que o Sol seja a única fonte de luz diurna!)
-          float nightOnlyFactor = 1.0 - smoothstep(0.0, 0.14, uDaylight);
-          float effectiveLunarLight = uMoonLight * nightOnlyFactor;
-          float totalLunarFocus = (coreFocus * 0.85 + haloNavyFocus * 0.95 + wideTransition) * effectiveLunarLight;
-
-          // Densidade do ar: mais denso nas camadas inferiores, afinando no zênite
-          float airDensity = 1.0 - elevation * 0.35;
-          totalLunarFocus *= airDensity;
-
-          // Mescla para o tom azul marinho rico e profundo fiel à foto (#0a265c)
-          vec3 navyAtmosphere = mix(uMidnightBlue, uDeepNavyColor, clamp(totalLunarFocus * 1.45, 0.0, 1.0));
-
-          // Mistura suave do foco de luz da Lua com o céu noturno escuro estrelado
-          vec3 finalSky = mix(baseNightSky, navyAtmosphere, clamp(totalLunarFocus * 1.55, 0.0, 1.0));
-
-          // Destaque adicional de luz radiante no foco imediato ao redor da Lua (prateado-azulado)
-          // Estritamente presente no lado iluminado; zero no lado escuro!
-          vec3 lunarCoreLight = vec3(0.12, 0.28, 0.58);
-          finalSky += lunarCoreLight * (coreFocus * 0.65 * effectiveLunarLight);
+          // 2. Céu noturno limpo, escuro e autêntico (sem cones de luz artificial ou halos falsos na abóbada celeste)
+          vec3 finalSky = baseNightSky;
 
           // Transição realista para Pôr do Sol e Dia com Espalhamento Rayleigh e Mie
           if (uDaylight > 0.005) {
@@ -1207,6 +1162,8 @@ export class CelestialSphere3D {
               float rawSunDot = clamp(dot(dir, uSunDirection), -1.0, 1.0);
               float sunDotRay = max(0.0, rawSunDot);
               float silverLining = (pow(sunDotRay, 12.0) * 1.50 + pow(sunDotRay, 3.0) * 0.42) * (1.0 - totalCloudDens * 0.50);
+              float moonCos = clamp(dot(dir, uMoonDirection), -1.0, 1.0);
+              float effectiveLunarLight = uMoonLight * (1.0 - clamp(uDaylight * 2.0, 0.0, 1.0));
               float moonSilver = pow(max(0.0, moonCos), 8.0) * 0.80 * effectiveLunarLight;
 
               // Arco calibrado (-20%) de nuvens brancas abaixo e ao redor do Sol:
@@ -1464,7 +1421,8 @@ export class CelestialSphere3D {
     showConstellationLabels = true,
     constellationLineColor: 'cyan' | 'gold' | 'white' | 'magenta' = 'cyan',
     constellationLineOpacity = 0.85,
-    selectedConstellation: string | null = null
+    selectedConstellation: string | null = null,
+    showAtmosphereClouds = true
   ) {
     this.group.visible = true;
     this.globalGroup.visible = false;
@@ -1486,7 +1444,7 @@ export class CelestialSphere3D {
       this.humanAtmosphereMat.uniforms.uMoonLight.value = moonLightFactor;
       this.humanAtmosphereMat.uniforms.uMoonAltitude.value = (moonAltitudeDeg * Math.PI) / 180.0;
       this.humanAtmosphereMat.uniforms.uTime.value = time * 0.001;
-      this.humanAtmosphereMat.uniforms.uShowAtmosphereClouds.value = 1.0;
+      this.humanAtmosphereMat.uniforms.uShowAtmosphereClouds.value = showAtmosphereClouds ? 1.0 : 0.0;
     }
 
     if (this.sphericalConstellationsGroup) {

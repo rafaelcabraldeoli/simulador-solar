@@ -2078,11 +2078,11 @@ export function generateMoonTexture(): THREE.CanvasTexture {
     for (let x = 0; x < width; x++) {
       const idx = (y * width + x) * 4;
       const n = fbm(x, y, 42);
-      // Highlands albedo: natural bright anorthositic regolith (178 - 235)
-      const baseGray = Math.min(242, 178 + Math.floor(n * 58));
+      // Highlands albedo: natural silvery-ash anorthositic regolith (145 - 208)
+      const baseGray = Math.min(220, 142 + Math.floor(n * 64));
       data[idx] = baseGray;
       data[idx + 1] = Math.min(255, baseGray + 2); // subtle cool mineral tint
-      data[idx + 2] = Math.min(255, baseGray + 5);
+      data[idx + 2] = Math.min(255, baseGray + 4);
       data[idx + 3] = 255;
     }
   }
@@ -2104,33 +2104,33 @@ export function generateMoonTexture(): THREE.CanvasTexture {
     name: string;
   }[] = [
     // Oceanus Procellarum (Vast Western Plain)
-    { cx: 380, cy: 225, rx: 112, ry: 132, darkness: 0.72, roughness: 0.8, name: 'Oceanus Procellarum' },
-    { cx: 330, cy: 260, rx: 78, ry: 92, darkness: 0.75, roughness: 0.7, name: 'Procellarum South' },
+    { cx: 380, cy: 225, rx: 112, ry: 132, darkness: 0.78, roughness: 0.8, name: 'Oceanus Procellarum' },
+    { cx: 330, cy: 260, rx: 78, ry: 92, darkness: 0.80, roughness: 0.7, name: 'Procellarum South' },
     // Mare Imbrium (Sea of Rains)
-    { cx: 440, cy: 175, rx: 72, ry: 66, darkness: 0.78, roughness: 0.5, name: 'Mare Imbrium' },
+    { cx: 440, cy: 175, rx: 72, ry: 66, darkness: 0.82, roughness: 0.5, name: 'Mare Imbrium' },
     // Sinus Iridum (Bay of Rainbows)
-    { cx: 405, cy: 145, rx: 26, ry: 23, darkness: 0.80, roughness: 0.4, name: 'Sinus Iridum' },
+    { cx: 405, cy: 145, rx: 26, ry: 23, darkness: 0.84, roughness: 0.4, name: 'Sinus Iridum' },
     // Mare Serenitatis (Sea of Serenity)
-    { cx: 545, cy: 185, rx: 50, ry: 46, darkness: 0.78, roughness: 0.45, name: 'Mare Serenitatis' },
+    { cx: 545, cy: 185, rx: 50, ry: 46, darkness: 0.82, roughness: 0.45, name: 'Mare Serenitatis' },
     // Mare Tranquillitatis (Sea of Tranquility - Dark Titanium Basalt)
-    { cx: 580, cy: 235, rx: 56, ry: 52, darkness: 0.82, roughness: 0.6, name: 'Mare Tranquillitatis' },
+    { cx: 580, cy: 235, rx: 56, ry: 52, darkness: 0.86, roughness: 0.6, name: 'Mare Tranquillitatis' },
     // Mare Crisium (Isolated Oval Sea)
-    { cx: 665, cy: 205, rx: 38, ry: 34, darkness: 0.84, roughness: 0.35, name: 'Mare Crisium' },
+    { cx: 665, cy: 205, rx: 38, ry: 34, darkness: 0.88, roughness: 0.35, name: 'Mare Crisium' },
     // Mare Fecunditatis
-    { cx: 640, cy: 270, rx: 50, ry: 56, darkness: 0.74, roughness: 0.6, name: 'Mare Fecunditatis' },
+    { cx: 640, cy: 270, rx: 50, ry: 56, darkness: 0.78, roughness: 0.6, name: 'Mare Fecunditatis' },
     // Mare Nectaris
-    { cx: 585, cy: 295, rx: 34, ry: 32, darkness: 0.78, roughness: 0.4, name: 'Mare Nectaris' },
+    { cx: 585, cy: 295, rx: 34, ry: 32, darkness: 0.82, roughness: 0.4, name: 'Mare Nectaris' },
     // Mare Nubium
-    { cx: 465, cy: 305, rx: 56, ry: 52, darkness: 0.74, roughness: 0.65, name: 'Mare Nubium' },
+    { cx: 465, cy: 305, rx: 56, ry: 52, darkness: 0.78, roughness: 0.65, name: 'Mare Nubium' },
     // Mare Humorum
-    { cx: 395, cy: 315, rx: 34, ry: 32, darkness: 0.78, roughness: 0.4, name: 'Mare Humorum' },
+    { cx: 395, cy: 315, rx: 34, ry: 32, darkness: 0.82, roughness: 0.4, name: 'Mare Humorum' },
     // Mare Vaporum & Sinus Medii (Central Bays)
-    { cx: 510, cy: 230, rx: 32, ry: 26, darkness: 0.72, roughness: 0.5, name: 'Mare Vaporum' },
+    { cx: 510, cy: 230, rx: 32, ry: 26, darkness: 0.76, roughness: 0.5, name: 'Mare Vaporum' },
     // Mare Frigoris (Northern Long Arc)
-    { cx: 500, cy: 120, rx: 132, ry: 20, darkness: 0.68, roughness: 0.7, name: 'Mare Frigoris' },
+    { cx: 500, cy: 120, rx: 132, ry: 20, darkness: 0.72, roughness: 0.7, name: 'Mare Frigoris' },
     // Far-side sparse basins: Mare Moscoviense & South Pole-Aitken subtle shade
-    { cx: 890, cy: 180, rx: 28, ry: 24, darkness: 0.62, roughness: 0.4, name: 'Mare Moscoviense' },
-    { cx: 512, cy: 450, rx: 140, ry: 45, darkness: 0.45, roughness: 0.8, name: 'South Pole-Aitken' },
+    { cx: 890, cy: 180, rx: 28, ry: 24, darkness: 0.66, roughness: 0.4, name: 'Mare Moscoviense' },
+    { cx: 512, cy: 450, rx: 140, ry: 45, darkness: 0.50, roughness: 0.8, name: 'South Pole-Aitken' },
   ];
 
   mariaBasins.forEach(m => {
@@ -2138,10 +2138,10 @@ export function generateMoonTexture(): THREE.CanvasTexture {
     // Draw organic basaltic basin with fractal feathering
     const grad = ctx.createRadialGradient(m.cx, m.cy, 0, m.cx, m.cy, Math.max(m.rx, m.ry));
     const alpha = m.darkness;
-    grad.addColorStop(0.0, `rgba(32, 38, 48, ${alpha})`);
-    grad.addColorStop(0.55, `rgba(48, 56, 68, ${alpha * 0.88})`);
-    grad.addColorStop(0.85, `rgba(78, 88, 102, ${alpha * 0.48})`);
-    grad.addColorStop(1.0, 'rgba(120, 130, 145, 0)');
+    grad.addColorStop(0.0, `rgba(26, 32, 42, ${alpha})`);
+    grad.addColorStop(0.55, `rgba(40, 48, 60, ${alpha * 0.90})`);
+    grad.addColorStop(0.85, `rgba(68, 78, 92, ${alpha * 0.50})`);
+    grad.addColorStop(1.0, 'rgba(110, 120, 135, 0)');
 
     ctx.fillStyle = grad;
     ctx.beginPath();

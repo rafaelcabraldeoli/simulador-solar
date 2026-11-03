@@ -390,7 +390,7 @@ export function calculateAstroPositions(
   
   // Vertical altitude calculation:
   const diurnalHourAngle = ((localSolarHours - 12) / 24) * 2 * Math.PI;
-  const baseSunY = ((settings.sunDistanceKm / 5000) * 18) * 0.5;
+  const baseSunY = (((settings.sunDistanceKm || 5000) / 5000) * 18) * 0.5;
   const sunY = baseSunY + 0.9 * seasonalFactor + 0.45 * Math.cos(diurnalHourAngle);
   const sunX = sunRadius * Math.cos(sunAngleRad);
   const sunZ = sunRadius * Math.sin(sunAngleRad); // Clockwise circuit: (x = cos, z = sin)

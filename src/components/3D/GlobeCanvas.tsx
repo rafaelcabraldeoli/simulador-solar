@@ -567,13 +567,32 @@ const STELLAR_COLORS = [
   new THREE.Color('#bae6fd'),
 ];
 
-export function latLngToSphereVector(latDeg: number, lngDeg: number, radius: number = GLOBE_RADIUS): THREE.Vector3 {
+// Pre-allocated static scratch objects to eliminate per-frame GC allocations
+const _scratchV1 = new THREE.Vector3();
+const _scratchV2 = new THREE.Vector3();
+const _scratchV3 = new THREE.Vector3();
+const _scratchV4 = new THREE.Vector3();
+const _scratchV5 = new THREE.Vector3();
+const _scratchV6 = new THREE.Vector3();
+const _scratchV7 = new THREE.Vector3();
+const _scratchV8 = new THREE.Vector3();
+const _scratchM1 = new THREE.Matrix4();
+const _scratchM2 = new THREE.Matrix4();
+const _scratchM3 = new THREE.Matrix4();
+const _scratchQ1 = new THREE.Quaternion();
+const _scratchQ2 = new THREE.Quaternion();
+
+export function latLngToSphereVector(latDeg: number, lngDeg: number, radius: number = GLOBE_RADIUS, target?: THREE.Vector3): THREE.Vector3 {
   const latRad = (latDeg * Math.PI) / 180;
   const lngRad = (lngDeg * Math.PI) / 180;
   const cosLat = Math.cos(latRad);
   const x = radius * cosLat * Math.sin(lngRad);
   const y = radius * Math.sin(latRad);
   const z = radius * cosLat * Math.cos(lngRad);
+  if (target) {
+    target.set(x, y, z);
+    return target;
+  }
   return new THREE.Vector3(x, y, z);
 }
 
@@ -1137,7 +1156,7 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      depthTest: false,
+      depthTest: true,
       side: THREE.DoubleSide,
       toneMapped: false,
       uniforms: {
@@ -1237,13 +1256,13 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
     sunProminencesMesh.renderOrder = 2;
     sunGroup.add(sunProminencesMesh);
 
-    // 3. Coroa Solar e Vento Ardente 3D (Luz pura em Additive Blending com raios e ondulações solares)
+    // 3. Coroa Solar e Vento Ardente 3D (Luz pura com depthTest: true para não vazar através dos planetas)
     const sunCoronaHaloGeo = new THREE.SphereGeometry(sunRadius * 1.15, 64, 48);
     const sunCoronaHaloMat = new THREE.ShaderMaterial({
       transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      depthTest: false,
+      depthTest: true,
       side: THREE.BackSide,
       toneMapped: false,
       uniforms: {
@@ -1290,16 +1309,15 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
         transparent: true,
         opacity: 0.98,
         depthWrite: false,
-        depthTest: false,
+        depthTest: true,
         toneMapped: false,
       })
     );
-    sunSparkleSprite.renderOrder = 10;
+    sunSparkleSprite.renderOrder = 2;
     sunSparkleSprite.scale.set(24.0, 24.0, 1);
     sunGroup.add(sunSparkleSprite);
 
-    // 3B. Pure 3D Volumetric Spherical Golden-Yellow Solar Irradiance Field (0 -> 2350 units / Neptune)
-    // ZERO 2D flat disc — 100% 3D concentric spherical shells so it NEVER cuts the Earth or Moon in half!
+    // 3B. Pure 3D Volumetric Spherical Solar Irradiance Field (Streamlined to 3 lightweight shells for 60fps performance)
     const solarReachRadius = 2350.0;
     const occluderPositions = Array.from({ length: 9 }, () => new THREE.Vector3(99999, 0, 99999));
     const occluderRadii = [
@@ -1316,16 +1334,17 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
 
     const solar3DVolumeGroup = new THREE.Group();
     sunGroup.add(solar3DVolumeGroup);
-    const volumeRadii = [34, 60, 102, 165, 255, 385, 580, 860, 1250, 1720, 2250];
-    const volumeAlphas = [0.24, 0.19, 0.15, 0.12, 0.095, 0.072, 0.054, 0.038, 0.026, 0.017, 0.010];
+    const volumeRadii = [60, 280, 1400];
+    const volumeAlphas = [0.18, 0.09, 0.03];
     const solarVolumeMats: THREE.ShaderMaterial[] = [];
 
     volumeRadii.forEach((rVol, idx) => {
-      const volGeo = new THREE.SphereGeometry(rVol, 64, 48);
+      const volGeo = new THREE.SphereGeometry(rVol, 32, 24);
       const normR = rVol / solarReachRadius;
       const volMat = new THREE.ShaderMaterial({
         transparent: true,
         depthWrite: false,
+        depthTest: true,
         blending: THREE.AdditiveBlending,
         side: THREE.BackSide,
         toneMapped: false,
@@ -1358,40 +1377,21 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
             float dist = length(vWorldPos);
             vec3 rayDir = vWorldPos / max(dist, 0.0001);
 
-            // 1. Radial 3D Shadow Wake behind planets on the spherical shell
             float shadowFactor = 1.0;
-            // 2. Uniform Full-Screen Eclipse Darkening when the Camera itself is behind a planet (inside its shadow cone!)
-            float cameraInShadowDarkening = 1.0;
-
-            for (int i = 0; i < 9; i++) {
+            // Primary inner occluders (Mercury, Venus, Earth, Moon)
+            for (int i = 0; i < 4; i++) {
               vec3 bodyPos = uOccluderPos[i];
               float bodyRad = uOccluderRad[i];
               float proj = dot(bodyPos, rayDir);
               if (proj > 0.0 && dist > proj) {
                 vec3 closestPt = rayDir * proj;
                 float perpDist = length(bodyPos - closestPt);
-                float wakeLength = 2400.0;
+                float wakeLength = 1600.0;
                 float distBehind = dist - proj;
                 if (distBehind < wakeLength) {
                   float wakeFade = 1.0 - clamp(distBehind / wakeLength, 0.0, 1.0);
                   float inUmbra = 1.0 - smoothstep(bodyRad * 0.85, bodyRad * 1.45, perpDist);
                   shadowFactor *= (1.0 - inUmbra * wakeFade * 0.96);
-                }
-              }
-
-              // Check if the camera is positioned behind this planet (in its anti-solar shadow wake):
-              // Instead of cutting the screen diagonally, darken the entire solar glare uniformly across the whole screen!
-              float dBody = length(bodyPos);
-              if (dBody > 1.0) {
-                vec3 shadowAxis = bodyPos / dBody;
-                vec3 camOffset = cameraPosition - bodyPos;
-                float camAlongAxis = dot(camOffset, shadowAxis);
-                if (camAlongAxis > 0.0 && camAlongAxis < 320.0) {
-                  float camPerpDist = length(camOffset - shadowAxis * camAlongAxis);
-                  float umbraRadiusAtCam = bodyRad * (1.15 + camAlongAxis * 0.015);
-                  float camInCone = 1.0 - smoothstep(umbraRadiusAtCam * 0.55, umbraRadiusAtCam * 1.85, camPerpDist);
-                  float distFade = 1.0 - clamp(camAlongAxis / 320.0, 0.0, 1.0);
-                  cameraInShadowDarkening *= (1.0 - camInCone * distFade * 0.82);
                 }
               }
             }
@@ -1402,7 +1402,7 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
             vec3 nearCol = vec3(1.0, 0.90, 0.38);
             vec3 farCol = vec3(0.95, 0.66, 0.18);
             vec3 col = mix(nearCol, farCol, clamp(uNormR * 1.35, 0.0, 1.0));
-            float alpha = uBaseAlpha * softSphere * uIntensity * shadowFactor * cameraInShadowDarkening;
+            float alpha = uBaseAlpha * softSphere * uIntensity * shadowFactor;
             if (alpha < 0.001) discard;
             gl_FragColor = vec4(col, alpha);
           }
@@ -3082,17 +3082,15 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
           float directSunlight = smoothstep(-0.02, 0.14, ndotl) * uSunLightEnabled * uEarthShadowOcclusion;
 
           // 2. Authentic Hapke / Lommel-Seeliger Lunar Regolith Reflectance:
-          // Unlike a shiny plastic ball, the real Moon's porous dust scatters light uniformly right out to its outer limb!
-          float lommelSeeliger = max(0.0, ndotl) / max(0.14, max(0.0, ndotl) + ndotv * 0.65);
-          float regolithAlbedo = mix(pow(max(0.0, ndotl), 0.55), lommelSeeliger * 1.45, 0.62);
+          float lommelSeeliger = max(0.0, ndotl) / max(0.15, max(0.0, ndotl) + ndotv * 0.65);
+          float regolithAlbedo = mix(pow(max(0.0, ndotl), 0.60), lommelSeeliger * 1.05, 0.52);
 
           // Subtle topographic contrast between dark basaltic Maria and bright anorthositic Highlands
           float luma = dot(tex, vec3(0.299, 0.587, 0.114));
-          vec3 crispMoonTex = mix(vec3(luma), tex, 0.65);
-          crispMoonTex = smoothstep(0.12, 0.92, crispMoonTex);
+          vec3 crispMoonTex = mix(vec3(luma), tex, 0.70);
 
-          // Nighttime Moon: brilliant pearlescent silver-white
-          vec3 nightMoonCol = (vec3(0.28, 0.30, 0.34) + crispMoonTex * 0.85) * (0.35 + 1.45 * regolithAlbedo) * vec3(0.98, 0.99, 1.04);
+          // Nighttime Moon: crisp, natural photographic lunar regolith (never blown-out into pure flat white)
+          vec3 nightMoonCol = crispMoonTex * (0.38 + 0.62 * regolithAlbedo) * vec3(0.98, 0.99, 1.02);
 
           // Daytime Moon in the Blue Sky (exact match to real daytime photography):
           // Atmospheric Rayleigh blue sky light sits IN FRONT of the Moon, so the Moon's dark side is 100% sky-blue,
@@ -3407,6 +3405,30 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
 
     const J2026_MS = Date.UTC(2026, 0, 1, 0, 0, 0);
 
+    // Persistent math vectors & matrices to eliminate GC pauses (60 fps without memory spikes)
+    const moonWorldPosVec = new THREE.Vector3();
+    const tempMoonWorldPos = new THREE.Vector3();
+    const surfaceLocalPos = new THREE.Vector3();
+    const obsWorldPos = new THREE.Vector3();
+    const obsWorldNormal = new THREE.Vector3();
+    const localEast = new THREE.Vector3();
+    const localNorth = new THREE.Vector3();
+    const localWest = new THREE.Vector3();
+    const localSouth = new THREE.Vector3();
+    const eyePos = new THREE.Vector3();
+    const toSunWorld = new THREE.Vector3();
+    const localSunDir = new THREE.Vector3();
+    const toMoonWorld = new THREE.Vector3();
+    const localMoonDir = new THREE.Vector3();
+    const northAxisWorld = new THREE.Vector3();
+    const polePerp = new THREE.Vector3();
+    const envBasis = new THREE.Matrix4();
+    const skyDomeBasis = new THREE.Matrix4();
+    const poleBasis = new THREE.Matrix4();
+    const tangentBasisQuat = new THREE.Quaternion();
+    const celestialPoleQuat = new THREE.Quaternion();
+    const AXIS_Y = new THREE.Vector3(0, 1, 0);
+
     const animate = (now: number) => {
       animId = requestAnimationFrame(animate);
 
@@ -3464,6 +3486,26 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
       const earthZ = -Math.sin(earthOrbitAngle) * EARTH_ORBIT_RADIUS;
       earthSystemGroup.position.set(earthX, 0, earthZ);
 
+      // Physical line-of-sight occlusion of the Sun (0, 0, 0) by the Earth's solid sphere
+      // When the camera is looking at Earth from the night side, the Earth's solid silhouette completely blocks the Sun!
+      let sunOcclusion = 1.0;
+      const camDistToSun = camera.position.length();
+      if (camDistToSun > 0.1) {
+        _scratchV1.copy(camera.position).negate().normalize(); // Ray direction towards Central Sun (0, 0, 0)
+        _scratchV2.subVectors(earthSystemGroup.position, camera.position);
+        const proj = _scratchV2.dot(_scratchV1);
+        if (proj > 0.0 && proj < camDistToSun) {
+          _scratchV3.copy(camera.position).addScaledVector(_scratchV1, proj);
+          const perpDistToEarth = _scratchV3.distanceTo(earthSystemGroup.position);
+          const blockRad = GLOBE_RADIUS * 1.06;
+          if (perpDistToEarth < blockRad) {
+            sunOcclusion = THREE.MathUtils.clamp((perpDistToEarth - GLOBE_RADIUS * 0.90) / (blockRad - GLOBE_RADIUS * 0.90), 0.0, 1.0);
+          }
+        }
+      }
+      sunSparkleSprite.visible = isSunLit && sunOcclusion > 0.01;
+      (sunSparkleSprite.material as THREE.SpriteMaterial).opacity = 0.98 * sunOcclusion;
+
       const effectiveTiltDeg = cfg.axialTiltDeg ?? 23.44;
       const tiltRad = (effectiveTiltDeg * Math.PI) / 180;
       earthTiltGroup.rotation.set(0, 0, -tiltRad);
@@ -3491,8 +3533,7 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
       terminatorGroup.lookAt(0, 0, 0);
       terminatorGroup.visible = cfg.showTerminatorRing && isSunLit && !isHumanSurface;
 
-      const earthAntiSunTarget = earthSystemGroup.position.clone().multiplyScalar(2.0);
-      earthShadowCone.mesh.lookAt(earthAntiSunTarget);
+      earthShadowCone.mesh.lookAt(earthX * 2.0, 0, earthZ * 2.0);
       earthShadowCone.mesh.visible = isSunLit && !isHumanSurface;
       earthShadowCone.mat.uniforms.uEnabled.value = isSunLit ? 1.0 : 0.0;
       occluderPositions[2].copy(earthSystemGroup.position);
@@ -3545,33 +3586,33 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
         if (Math.abs(diffSec) <= 5400) {
           const blendWeight = Math.cos((diffSec / 5400.0) * (Math.PI / 2)) ** 2;
           if (macroCatalogEclipse.type === 'solar') {
-            const surfaceLocalPos = latLngToSphereVector(
+            latLngToSphereVector(
               macroCatalogEclipse.lat,
               macroCatalogEclipse.lng,
-              GLOBE_RADIUS
+              GLOBE_RADIUS,
+              _scratchV1
             );
-            const eclipseSpotWorld = surfaceLocalPos.clone().applyMatrix4(earthSpinGroup.matrixWorld);
+            _scratchV2.copy(_scratchV1).applyMatrix4(earthSpinGroup.matrixWorld); // eclipseSpotWorld
             // Ray from the eclipse location on Earth towards the central Sun (0, 0, 0)
-            const dirSpotToSun = new THREE.Vector3().subVectors(new THREE.Vector3(0, 0, 0), eclipseSpotWorld).normalize();
-            const v = new THREE.Vector3().subVectors(eclipseSpotWorld, earthSystemGroup.position);
-            const vDotU = v.dot(dirSpotToSun);
-            // Exact distance d from observer along dirSpotToSun where |v + dirSpotToSun * d| = moonOrbitRadius (6.0)
+            _scratchV3.copy(_scratchV2).negate().normalize(); // dirSpotToSun
+            _scratchV4.subVectors(_scratchV2, earthSystemGroup.position); // v
+            const vDotU = _scratchV4.dot(_scratchV3);
             const d = -vDotU + Math.sqrt(vDotU * vDotU + (moonOrbitRadius * moonOrbitRadius - 1.0));
-            const moonAtTotalityWorld = eclipseSpotWorld.clone().addScaledVector(dirSpotToSun, d);
-            const alignedMoonPos = moonAtTotalityWorld.clone().sub(earthSystemGroup.position);
+            _scratchV5.copy(_scratchV2).addScaledVector(_scratchV3, d); // moonAtTotalityWorld
+            _scratchV6.subVectors(_scratchV5, earthSystemGroup.position); // alignedMoonPos
 
-            const northAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(earthTiltGroup.quaternion).normalize();
-            const orbitTangent = new THREE.Vector3().crossVectors(northAxis, dirSpotToSun).normalize();
+            _scratchV7.set(0, 1, 0).applyQuaternion(earthTiltGroup.quaternion).normalize(); // northAxis
+            _scratchV8.crossVectors(_scratchV7, _scratchV3).normalize(); // orbitTangent
             const transitProgress = diffSec / 4500.0;
-            alignedMoonPos.addScaledVector(orbitTangent, transitProgress * 0.32);
-            moonGroup.position.lerp(alignedMoonPos, blendWeight);
+            _scratchV6.addScaledVector(_scratchV8, transitProgress * 0.32);
+            moonGroup.position.lerp(_scratchV6, blendWeight);
           } else if (macroCatalogEclipse.type === 'lunar') {
-            const dirEarthAntiSun = earthSystemGroup.position.clone().normalize();
-            const alignedMoonPos = dirEarthAntiSun.clone().multiplyScalar(moonOrbitRadius);
-            const northAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(earthTiltGroup.quaternion).normalize();
-            const orbitTangent = new THREE.Vector3().crossVectors(northAxis, dirEarthAntiSun).normalize();
-            alignedMoonPos.addScaledVector(orbitTangent, (diffSec / 5400.0) * 0.35);
-            moonGroup.position.lerp(alignedMoonPos, blendWeight);
+            _scratchV1.copy(earthSystemGroup.position).normalize(); // dirEarthAntiSun
+            _scratchV2.copy(_scratchV1).multiplyScalar(moonOrbitRadius); // alignedMoonPos
+            _scratchV3.set(0, 1, 0).applyQuaternion(earthTiltGroup.quaternion).normalize(); // northAxis
+            _scratchV4.crossVectors(_scratchV3, _scratchV1).normalize(); // orbitTangent
+            _scratchV2.addScaledVector(_scratchV4, (diffSec / 5400.0) * 0.35);
+            moonGroup.position.lerp(_scratchV2, blendWeight);
           }
         }
       }
@@ -3593,7 +3634,6 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
       moonLabel.visible = cfg.showPlanetLabels && !isHumanSurface;
 
       earthSystemGroup.updateMatrixWorld(true);
-      const moonWorldPosVec = new THREE.Vector3();
       moonGroup.getWorldPosition(moonWorldPosVec);
 
       moonUniforms.uSunWorldPosition.value.set(0, 0, 0);
@@ -3605,8 +3645,7 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
       cloudSphereUniforms.uMoonWorldPosition.value.copy(moonWorldPosVec);
       occluderPositions[3].copy(moonWorldPosVec);
 
-      const moonAntiSunTarget = moonWorldPosVec.clone().multiplyScalar(2.0);
-      moonShadowCone.mesh.lookAt(moonAntiSunTarget);
+      moonShadowCone.mesh.lookAt(moonWorldPosVec.x * 2.0, moonWorldPosVec.y * 2.0, moonWorldPosVec.z * 2.0);
       moonShadowCone.mesh.visible = isSunLit && !isHumanSurface;
       moonShadowCone.mat.uniforms.uEnabled.value = isSunLit ? 1.0 : 0.0;
 
@@ -3670,7 +3709,6 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
 
         // Update all natural moons orbiting this planet in real time!
         systemGroup.updateMatrixWorld(true);
-        const tempMoonWorldPos = new THREE.Vector3();
         moons.forEach((mEntry, mIdx) => {
           const moonAngle =
             mEntry.initialPhaseRad + (daysSinceEpoch / mEntry.moonSpec.orbitalPeriodDays) * Math.PI * 2;
@@ -3720,14 +3758,15 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
       tropicsGroup.visible = cfg.showTropicsAndCircles && !isHumanSurface;
       citiesGlobeGroup.visible = false;
 
-      const obsLocalPos = latLngToSphereVector(
+      latLngToSphereVector(
         store.settings.observerLat,
         store.settings.observerLng,
-        GLOBE_RADIUS + 0.02
+        GLOBE_RADIUS + 0.02,
+        _scratchV1
       );
-      observerPinGroup.position.copy(obsLocalPos);
-      const obsNormalLocal = obsLocalPos.clone().normalize();
-      observerPinGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), obsNormalLocal);
+      observerPinGroup.position.copy(_scratchV1);
+      _scratchV2.copy(_scratchV1).normalize();
+      observerPinGroup.quaternion.setFromUnitVectors(AXIS_Y, _scratchV2);
       observerPinGroup.visible = cfg.showObserverPin && !isHumanSurface;
       tangentHorizonGroup.visible = cfg.showObserverHorizonPlane && !isHumanSurface;
 
@@ -3797,46 +3836,46 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
         scene.background = null;
 
         // Exact surface point on the rotating spherical Earth (radius = GLOBE_RADIUS)
-        const surfaceLocalPos = latLngToSphereVector(
+        latLngToSphereVector(
           store.settings.observerLat,
           store.settings.observerLng,
-          GLOBE_RADIUS
+          GLOBE_RADIUS,
+          surfaceLocalPos
         );
-        const obsWorldPos = surfaceLocalPos.clone().applyMatrix4(earthSpinGroup.matrixWorld);
-        const obsWorldNormal = obsWorldPos.clone().sub(earthSystemGroup.position).normalize();
+        obsWorldPos.copy(surfaceLocalPos).applyMatrix4(earthSpinGroup.matrixWorld);
+        obsWorldNormal.subVectors(obsWorldPos, earthSystemGroup.position).normalize();
 
-        const northAxisWorld = new THREE.Vector3(0, 1, 0).applyQuaternion(earthTiltGroup.quaternion).normalize();
-        let localEast = new THREE.Vector3().crossVectors(northAxisWorld, obsWorldNormal);
+        northAxisWorld.set(0, 1, 0).applyQuaternion(earthTiltGroup.quaternion).normalize();
+        localEast.crossVectors(northAxisWorld, obsWorldNormal);
         if (localEast.lengthSq() < 1e-6) {
           localEast.set(1, 0, 0);
         } else {
           localEast.normalize();
         }
-        const localNorth = new THREE.Vector3().crossVectors(obsWorldNormal, localEast).normalize();
-        const localWest = localEast.clone().negate();
-        const localSouth = localNorth.clone().negate();
+        localNorth.crossVectors(obsWorldNormal, localEast).normalize();
+        localWest.copy(localEast).negate();
+        localSouth.copy(localNorth).negate();
 
         // Position 3D Ground Biome (Field/Trees/Mountains/Beach/City) tangent to the spherical surface at the observer's GPS point!
-        // Note: ObserverEnvironment3D is built with local +X = North, +Y = Up (Zenith), +Z = East!
         humanObserverEnv.setVisible(true);
         humanObserverEnv.group.position.copy(obsWorldPos);
-        const envBasis = new THREE.Matrix4().makeBasis(localNorth, obsWorldNormal, localEast);
+        envBasis.makeBasis(localNorth, obsWorldNormal, localEast);
         humanObserverEnv.group.quaternion.setFromRotationMatrix(envBasis);
         humanObserverEnv.setBiome(store.settings.observerBiome || 'field');
 
         // Atmospheric Sky Dome orientation: local +X = East, +Y = Up (Zenith), +Z = South
-        const skyDomeBasis = new THREE.Matrix4().makeBasis(localEast, obsWorldNormal, localSouth);
-        const tangentBasisQuat = new THREE.Quaternion().setFromRotationMatrix(skyDomeBasis);
+        skyDomeBasis.makeBasis(localEast, obsWorldNormal, localSouth);
+        tangentBasisQuat.setFromRotationMatrix(skyDomeBasis);
 
         // Celestial Pole orientation: North Celestial Pole tilted at angle = observerLatitude above local North!
-        const polePerp = new THREE.Vector3().crossVectors(localEast, northAxisWorld).normalize();
-        const poleBasis = new THREE.Matrix4().makeBasis(localEast, northAxisWorld, polePerp);
-        const celestialPoleQuat = new THREE.Quaternion().setFromRotationMatrix(poleBasis);
+        polePerp.crossVectors(localEast, northAxisWorld).normalize();
+        poleBasis.makeBasis(localEast, northAxisWorld, polePerp);
+        celestialPoleQuat.setFromRotationMatrix(poleBasis);
 
         // Eye height above ground (0.0018 = 1.75m human eye level in soil scale; 0.012 = high lookout over trees!)
         const isHighLookout = (humanLookRef.current.eyeHeight || 0.04) >= 0.07;
         const eyeOffsetAboveGround = isHighLookout ? 0.012 : 0.0018;
-        const eyePos = obsWorldPos.clone().addScaledVector(obsWorldNormal, eyeOffsetAboveGround);
+        eyePos.copy(obsWorldPos).addScaledVector(obsWorldNormal, eyeOffsetAboveGround);
         camera.position.copy(eyePos);
         camera.up.copy(obsWorldNormal);
         if (camera.near !== 0.0002) {
@@ -3849,8 +3888,8 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
         }
 
         // Local Sun direction in observer's spherical tangent frame (X=East, Y=Up/Zenith, Z=South)
-        const toSunWorld = new THREE.Vector3().subVectors(new THREE.Vector3(0, 0, 0), eyePos).normalize();
-        const localSunDir = new THREE.Vector3(
+        toSunWorld.copy(eyePos).negate().normalize();
+        localSunDir.set(
           toSunWorld.dot(localEast),
           toSunWorld.dot(obsWorldNormal),
           toSunWorld.dot(localSouth)
@@ -3859,8 +3898,8 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
         const sunAzDeg = ((Math.atan2(localSunDir.x, -localSunDir.z) * 180) / Math.PI + 360) % 360;
 
         // Local Moon direction in observer's spherical tangent frame using exact macroscopic moonWorldPosVec
-        const toMoonWorld = new THREE.Vector3().subVectors(moonWorldPosVec, eyePos).normalize();
-        const localMoonDir = new THREE.Vector3(
+        toMoonWorld.subVectors(moonWorldPosVec, eyePos).normalize();
+        localMoonDir.set(
           toMoonWorld.dot(localEast),
           toMoonWorld.dot(obsWorldNormal),
           toMoonWorld.dot(localSouth)
@@ -3887,8 +3926,8 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
           : 0.0;
 
         // Place Local 3D Sun & Moon Sky Discs at r = 40.0 around the observer (inside the r=119.4 sky dome and behind the r=20..32 mountains!)
-        const sunSkyWorldPos = eyePos.clone().addScaledVector(toSunWorld, 40.0);
-        humanSunSkyGroup.position.copy(sunSkyWorldPos);
+        _scratchV1.copy(eyePos).addScaledVector(toSunWorld, 40.0);
+        humanSunSkyGroup.position.copy(_scratchV1);
         humanSunSkyGroup.visible = isSunLit && sunAltDeg > -3.5;
 
         if (isRealSolarEclipseActive) {
@@ -3914,7 +3953,8 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
           const sunsetFac = THREE.MathUtils.clamp(1.0 - Math.abs(sunAltDeg - 3.5) / 8.0, 0.0, 1.0);
           const spMat = humanSunSparkle.material as THREE.SpriteMaterial;
           if (sunAltDeg < 14.0) {
-            spMat.color.copy(new THREE.Color(0xfff5cc).lerp(new THREE.Color(0xff8822), sunsetFac));
+            _scratchV7.set(1.0, 0.96, 0.8).lerp(_scratchV8.set(1.0, 0.53, 0.13), sunsetFac);
+            spMat.color.setRGB(_scratchV7.x, _scratchV7.y, _scratchV7.z);
           } else {
             spMat.color.setHex(0xffffff);
           }
@@ -3922,8 +3962,8 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
         }
 
         // Moon sky disc sits at distance 39.75 (closer to camera than the Sun at 40.0)
-        const moonSkyWorldPos = eyePos.clone().addScaledVector(toMoonWorld, 39.75);
-        humanMoonSkyGroup.position.copy(moonSkyWorldPos);
+        _scratchV2.copy(eyePos).addScaledVector(toMoonWorld, 39.75);
+        humanMoonSkyGroup.position.copy(_scratchV2);
         // Tidal locking orientation with celestial North Pole up so the Moon's Maria & craters are properly oriented!
         humanMoonMesh.up.copy(northAxisWorld);
         humanMoonMesh.lookAt(eyePos);
@@ -3936,21 +3976,20 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
 
         // Compute visual phase direction on the local sky sphere so the lit crescent of the Moon
         // always points toward the Sun in the sky with a realistic visible crescent thickness!
-        const realMoonToSunDir = new THREE.Vector3().subVectors(new THREE.Vector3(0, 0, 0), moonWorldPosVec).normalize();
-        const skyMoonToSunVec = new THREE.Vector3().subVectors(sunSkyWorldPos, moonSkyWorldPos).normalize();
+        const realMoonToSunDir = _scratchV3.copy(moonWorldPosVec).negate().normalize();
+        const skyMoonToSunVec = _scratchV4.subVectors(_scratchV1, _scratchV2).normalize();
         // Blend between true 3D orbital phase and sky-sphere vector so even near young/old crescent phases
         // the Moon shows a crisp, photographic crescent instead of a paper-thin sliver
-        const viewFromObsToMoon = toMoonWorld.clone();
-        const rawCosPhase = realMoonToSunDir.dot(viewFromObsToMoon.clone().negate());
-        let effectiveMoonLightDir = realMoonToSunDir.clone();
+        const rawCosPhase = realMoonToSunDir.dot(_scratchV5.copy(toMoonWorld).negate());
+        const effectiveMoonLightDir = _scratchV6.copy(realMoonToSunDir);
         if (rawCosPhase < -0.65 && !isRealSolarEclipseActive) {
           // Ensure a graceful minimum crescent illumination in daytime when looking at the Moon near the Sun
-          const tangentTowardsSun = skyMoonToSunVec
-            .clone()
-            .addScaledVector(viewFromObsToMoon, -skyMoonToSunVec.dot(viewFromObsToMoon))
+          const tangentTowardsSun = _scratchV7
+            .copy(skyMoonToSunVec)
+            .addScaledVector(toMoonWorld, -skyMoonToSunVec.dot(toMoonWorld))
             .normalize();
-          effectiveMoonLightDir = viewFromObsToMoon
-            .clone()
+          effectiveMoonLightDir
+            .copy(toMoonWorld)
             .negate()
             .multiplyScalar(-0.45)
             .addScaledVector(tangentTowardsSun, 0.89)
@@ -3961,11 +4000,11 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
         humanMoonUniforms.uSunLightEnabled.value = isSunLit ? 1.0 : 0.0;
 
         // Compute true 3D Earth-Moon-Sun shadow occlusion for the Moon
-        const moonToEarthVec = new THREE.Vector3().subVectors(earthSystemGroup.position, moonWorldPosVec);
+        const moonToEarthVec = _scratchV7.subVectors(earthSystemGroup.position, moonWorldPosVec);
         const projOnSunRay = moonToEarthVec.dot(realMoonToSunDir);
         let earthShadowOcc = 1.0;
         if (projOnSunRay > 0.0) {
-          const closestPt = moonWorldPosVec.clone().addScaledVector(realMoonToSunDir, projOnSunRay);
+          const closestPt = _scratchV8.copy(moonWorldPosVec).addScaledVector(realMoonToSunDir, projOnSunRay);
           const perpDist = earthSystemGroup.position.distanceTo(closestPt);
           earthShadowOcc = THREE.MathUtils.smoothstep(perpDist, GLOBE_RADIUS * 0.96, GLOBE_RADIUS * 1.12);
         }
@@ -3999,7 +4038,7 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
         );
         humanAmbientLight.intensity = 0.14 + humanDaylightFactor * 1.65;
         humanDirLight.intensity = humanDaylightFactor * 2.5;
-        humanDirLight.position.copy(sunSkyWorldPos);
+        humanDirLight.position.copy(humanSunSkyGroup.position);
 
         // Position starry planets at r = 45.0 inside the local sky dome so they shine strictly by REFLECTING SUNLIGHT!
         const planetaryAlbedos: Record<string, number> = {
