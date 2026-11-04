@@ -20,16 +20,16 @@ export interface EclipseEvent {
 }
 
 export const ECLIPSE_CATALOG: EclipseEvent[] = [
-  // --- ECLIPSES SOLARES TOTAIS FUTUROS ---
+  // --- ECLIPSES SOLARES TOTAIS & ANULARES FUTUROS ---
   {
     id: 'solar-2026-spain-norway',
-    name: 'Eclipse Solar Total de 2026 (Espanha / Islândia / Noruega Ártica)',
+    name: 'Eclipse Solar Total de 2026 (Espanha / Islândia / Groenlândia)',
     shortName: 'Solar Total 2026 (Espanha / Islândia)',
     type: 'solar',
     category: 'future',
-    date: new Date(2026, 7, 12, 17, 45), // 12 de Agosto de 2026, 17:45 UTC (19:45 local Espanha)
+    date: new Date(Date.UTC(2026, 7, 12, 17, 47)), // 12 de Agosto de 2026, 17:47 UTC (19:47 CEST Espanha / 14:47 BRT)
     dateFormatted: '12/08/2026',
-    timeFormatted: '17:45 UTC (19:45 Local)',
+    timeFormatted: '17:47 UTC (19:47 Local Espanha)',
     timezone: 'CEST (UTC+2)',
     locationName: 'A Coruña, Galícia, Espanha',
     country: 'Espanha / Noruega Ártica',
@@ -42,14 +42,33 @@ export const ECLIPSE_CATALOG: EclipseEvent[] = [
     historicalSignificance: 'Primeiro eclipse solar total visível na Europa continental desde 1999.',
   },
   {
+    id: 'solar-2026-antarctica',
+    name: 'Eclipse Solar Anular de 2026 (Antártida / Borda de Gelo)',
+    shortName: 'Solar Anular 2026 (Antártida)',
+    type: 'solar',
+    category: 'future',
+    date: new Date(Date.UTC(2026, 1, 17, 12, 13)), // 17 de Fevereiro de 2026, 12:13 UTC
+    dateFormatted: '17/02/2026',
+    timeFormatted: '12:13 UTC',
+    timezone: 'UTC',
+    locationName: 'Costa da Princesa Elizabeth, Antártida',
+    country: 'Antártida',
+    flag: '❄️',
+    lat: -64.7,
+    lng: 86.8,
+    totalityDuration: '2m 20s',
+    biome: 'mountain',
+    description: 'Eclipse anular com o anel de fogo projetando sua sombra circular sobre o manto de gelo antártico.',
+  },
+  {
     id: 'solar-2027-egypt-luxor',
     name: 'Eclipse Solar Total de 2027 • "O Eclipse do Século" (Luxor, Egito)',
     shortName: 'Solar Total 2027 (Luxor, Egito)',
     type: 'solar',
     category: 'future',
-    date: new Date(2027, 7, 2, 10, 5), // 02 de Agosto de 2027, 10:05 UTC (12:05 / 13:05 local)
+    date: new Date(Date.UTC(2027, 7, 2, 10, 7)), // 02 de Agosto de 2027, 10:07 UTC (12:07 / 13:07 local)
     dateFormatted: '02/08/2027',
-    timeFormatted: '10:05 UTC (12:05 Local)',
+    timeFormatted: '10:07 UTC (12:07 Local)',
     timezone: 'EEST (UTC+3)',
     locationName: 'Luxor / Vale dos Reis, Egito',
     country: 'Egito',
@@ -67,9 +86,9 @@ export const ECLIPSE_CATALOG: EclipseEvent[] = [
     shortName: 'Solar Total 2028 (Sydney, Austrália)',
     type: 'solar',
     category: 'future',
-    date: new Date(2028, 6, 22, 4, 0), // 22 de Julho de 2028, 04:00 UTC (14:00 local Sydney)
+    date: new Date(Date.UTC(2028, 6, 22, 2, 56)), // 22 de Julho de 2028, 02:56 UTC (12:56 local Sydney)
     dateFormatted: '22/07/2028',
-    timeFormatted: '04:00 UTC (14:00 Local)',
+    timeFormatted: '02:56 UTC (12:56 Local)',
     timezone: 'AEST (UTC+10)',
     locationName: 'Sydney (Opera House), Austrália',
     country: 'Austrália',
@@ -86,9 +105,9 @@ export const ECLIPSE_CATALOG: EclipseEvent[] = [
     shortName: 'Solar Total 2030 (África do Sul)',
     type: 'solar',
     category: 'future',
-    date: new Date(2030, 10, 25, 6, 50), // 25 de Novembro de 2030, 06:50 UTC (08:50 local)
+    date: new Date(Date.UTC(2030, 10, 25, 6, 51)), // 25 de Novembro de 2030, 06:51 UTC (08:51 local)
     dateFormatted: '25/11/2030',
-    timeFormatted: '06:50 UTC (08:50 Local)',
+    timeFormatted: '06:51 UTC (08:51 Local)',
     timezone: 'SAST (UTC+2)',
     locationName: 'Durban, África do Sul',
     country: 'África do Sul',
@@ -107,9 +126,9 @@ export const ECLIPSE_CATALOG: EclipseEvent[] = [
     shortName: 'Lua de Sangue 2025 (Brasil • Noite)',
     type: 'lunar',
     category: 'future',
-    date: new Date(2025, 2, 14, 3, 30), // 14 de Março de 2025, 03:30 da madrugada
+    date: new Date(Date.UTC(2025, 2, 14, 6, 59)), // 14 de Março de 2025, 06:59 UTC (03:59 BRT madrugada)
     dateFormatted: '14/03/2025',
-    timeFormatted: '03:30 (Madrugada / Noite)',
+    timeFormatted: '06:59 UTC (03:59 Madrugada Brasil)',
     timezone: 'BRT (UTC-3)',
     locationName: 'Chapada dos Veadeiros / Brasília, Brasil',
     country: 'Brasil / Américas',
@@ -127,9 +146,9 @@ export const ECLIPSE_CATALOG: EclipseEvent[] = [
     shortName: 'Lua de Sangue 2025 (Egito • Noite)',
     type: 'lunar',
     category: 'future',
-    date: new Date(2025, 8, 7, 22, 15), // 07 de Setembro de 2025, 22:15 da noite
+    date: new Date(Date.UTC(2025, 8, 7, 18, 12)), // 07 de Setembro de 2025, 18:12 UTC (21:12 local Cairo)
     dateFormatted: '07/09/2025',
-    timeFormatted: '22:15 (Noite Estrelada)',
+    timeFormatted: '18:12 UTC (21:12 Noite Gizé)',
     timezone: 'EEST (UTC+3)',
     locationName: 'Pirâmides de Gizé / Cairo, Egito',
     country: 'Egito / Oriente Médio / Europa',
@@ -147,9 +166,9 @@ export const ECLIPSE_CATALOG: EclipseEvent[] = [
     shortName: 'Lua de Sangue 2026 (Atacama / Chile)',
     type: 'lunar',
     category: 'future',
-    date: new Date(2026, 2, 3, 4, 15), // 03 de Março de 2026, 04:15 da madrugada
+    date: new Date(Date.UTC(2026, 2, 3, 11, 34)), // 03 de Março de 2026, 11:34 UTC
     dateFormatted: '03/03/2026',
-    timeFormatted: '04:15 (Madrugada / Noite)',
+    timeFormatted: '11:34 UTC (08:34 CLT Chile)',
     timezone: 'CLT (UTC-3)',
     locationName: 'Deserto do Atacama, Chile',
     country: 'Chile / Américas',
@@ -158,7 +177,26 @@ export const ECLIPSE_CATALOG: EclipseEvent[] = [
     lng: -70.4042,
     totalityDuration: '58m',
     biome: 'andes',
-    description: 'A Lua Cheia mergulha na umbra de Ketu tingindo-se de vermelho-sangue rubi sobre as montanhas dos Andes no céu noturno mais límpido do planeta.',
+    description: 'A Lua Cheia mergulha na umbra tingindo-se de vermelho-sangue rubi sobre as montanhas dos Andes no céu noturno mais límpido do planeta.',
+  },
+  {
+    id: 'lunar-2026-partial-aug',
+    name: 'Eclipse Lunar Parcial de 2026 (Américas / Europa / África)',
+    shortName: 'Lunar Parcial 2026',
+    type: 'lunar',
+    category: 'future',
+    date: new Date(Date.UTC(2026, 7, 28, 4, 14)), // 28 de Agosto de 2026, 04:14 UTC
+    dateFormatted: '28/08/2026',
+    timeFormatted: '04:14 UTC (01:14 BRT)',
+    timezone: 'BRT (UTC-3)',
+    locationName: 'Oceano Atlântico / Américas',
+    country: 'Brasil / Atlântico',
+    flag: '🌎',
+    lat: -12.0,
+    lng: -38.5,
+    totalityDuration: '3h 18m',
+    biome: 'beach',
+    description: 'Eclipse lunar com mordida escura na face sul da Lua visível na madrugada atlântica.',
   },
   {
     id: 'lunar-2029-blood-moon',
@@ -166,9 +204,9 @@ export const ECLIPSE_CATALOG: EclipseEvent[] = [
     shortName: 'Super Lua de Sangue 2029 (Brasil • Noite)',
     type: 'lunar',
     category: 'future',
-    date: new Date(2029, 5, 26, 0, 30), // 26 de Junho de 2029, 00:30 da madrugada (meia-noite)
+    date: new Date(Date.UTC(2029, 5, 26, 3, 23)), // 26 de Junho de 2029, 03:23 UTC (00:23 BRT meia-noite)
     dateFormatted: '26/06/2029',
-    timeFormatted: '00:30 (Madrugada / Meia-Noite)',
+    timeFormatted: '03:23 UTC (00:23 BRT Meia-Noite)',
     timezone: 'BRT (UTC-3)',
     locationName: 'Rio de Janeiro / Arpoador, Brasil',
     country: 'Brasil / Atlântico',
@@ -187,9 +225,9 @@ export const ECLIPSE_CATALOG: EclipseEvent[] = [
     shortName: 'Grande Solar 2024 (Texas / México)',
     type: 'solar',
     category: 'past',
-    date: new Date(2024, 3, 8, 18, 38), // 08 de Abril de 2024, 18:38 UTC (13:38 local Texas)
+    date: new Date(Date.UTC(2024, 3, 8, 18, 18)), // 08 de Abril de 2024, 18:18 UTC (13:18 local Texas)
     dateFormatted: '08/04/2024',
-    timeFormatted: '18:38 UTC (13:38 Local)',
+    timeFormatted: '18:18 UTC (13:18 Local)',
     timezone: 'CDT (UTC-5)',
     locationName: 'Dallas / Fort Worth, Texas, EUA',
     country: 'Estados Unidos / México',
@@ -207,9 +245,9 @@ export const ECLIPSE_CATALOG: EclipseEvent[] = [
     shortName: 'Solar Ártico 2015 (Svalbard, Noruega)',
     type: 'solar',
     category: 'past',
-    date: new Date(2015, 2, 20, 10, 10), // 20 de Março de 2015, 10:10 UTC (11:10 local)
+    date: new Date(Date.UTC(2015, 2, 20, 9, 46)), // 20 de Março de 2015, 09:46 UTC (10:46 local)
     dateFormatted: '20/03/2015',
-    timeFormatted: '10:10 UTC (11:10 Local)',
+    timeFormatted: '09:46 UTC (10:46 Local)',
     timezone: 'CET (UTC+1)',
     locationName: 'Longyearbyen, Svalbard, Noruega',
     country: 'Noruega',
@@ -227,9 +265,9 @@ export const ECLIPSE_CATALOG: EclipseEvent[] = [
     shortName: 'Solar Histórico 1994 (Brasil)',
     type: 'solar',
     category: 'past',
-    date: new Date(1994, 10, 3, 12, 40), // 03 de Novembro de 1994, 12:40 UTC (09:40 local)
+    date: new Date(Date.UTC(1994, 10, 3, 13, 40)), // 03 de Novembro de 1994, 13:40 UTC (10:40 local)
     dateFormatted: '03/11/1994',
-    timeFormatted: '12:40 UTC (09:40 Local)',
+    timeFormatted: '13:40 UTC (10:40 Local)',
     timezone: 'BRT (UTC-3)',
     locationName: 'Foz do Iguaçu / Criciúma, Brasil',
     country: 'Brasil',
@@ -247,7 +285,7 @@ export const ECLIPSE_CATALOG: EclipseEvent[] = [
     shortName: 'Eclipse de Sobral 1919 (Brasil)',
     type: 'solar',
     category: 'past',
-    date: new Date(1919, 4, 29, 13, 0), // 29 de Maio de 1919, 13:00 UTC (10:00 local)
+    date: new Date(Date.UTC(1919, 4, 29, 13, 0)), // 29 de Maio de 1919, 13:00 UTC (10:00 local)
     dateFormatted: '29/05/1919',
     timeFormatted: '13:00 UTC (10:00 Local)',
     timezone: 'BRT (UTC-3)',
@@ -268,11 +306,15 @@ export const ECLIPSE_CATALOG: EclipseEvent[] = [
  */
 export function findMatchingCatalogEclipse(date: Date): EclipseEvent | null {
   const targetTime = date.getTime();
+  let bestMatch: EclipseEvent | null = null;
+  let minDiffHours = Infinity;
+
   for (const ev of ECLIPSE_CATALOG) {
     const diffHours = Math.abs(targetTime - ev.date.getTime()) / (1000 * 3600);
-    if (diffHours <= 4.0) {
-      return ev;
+    if (diffHours <= 4.0 && diffHours < minDiffHours) {
+      minDiffHours = diffHours;
+      bestMatch = ev;
     }
   }
-  return null;
+  return bestMatch;
 }

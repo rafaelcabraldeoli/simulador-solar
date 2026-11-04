@@ -424,7 +424,7 @@ export const PlanarCanvas: React.FC = () => {
     continentalGeo.computeVertexNormals();
 
     // 2. Vast Outer Ocean Geometry (Radius 58.0 to 8000.0 - expansive flat ocean plane at identical sea level)
-    const oceanGeo = new THREE.RingGeometry(WORLD_DISC_RADIUS, 8000.0, 256, 32);
+    const oceanGeo = new THREE.RingGeometry(WORLD_DISC_RADIUS, 8000.0, 360, 32);
     const oceanPosAttr = oceanGeo.attributes.position;
     const oceanUvAttr = oceanGeo.attributes.uv;
     for (let i = 0; i < oceanPosAttr.count; i++) {
@@ -593,36 +593,49 @@ export const PlanarCanvas: React.FC = () => {
         void main() {
           vUv = uv;
           vec3 pos = position;
+          float r = length(pos.xz);
 
-          float elev = texture2D(uDisplacementMap, uv).r;
-          vElevation = elev;
-
-          vec2 texel = vec2(1.0 / 1024.0, 1.0 / 1024.0);
-          float hL = texture2D(uDisplacementMap, uv - vec2(texel.x, 0.0)).r;
-          float hR = texture2D(uDisplacementMap, uv + vec2(texel.x, 0.0)).r;
-          float hD = texture2D(uDisplacementMap, uv - vec2(0.0, texel.y)).r;
-          float hU = texture2D(uDisplacementMap, uv + vec2(0.0, texel.y)).r;
-
-          // 1. Continental terrain elevation displacement
-          if (elev > 0.028) {
-            float normH = (elev - 0.028) / 0.972;
-            float h = pow(normH, 1.15) * uDisplacementScale * uShowMountainRelief * 1.3125;
-            pos.y += h;
-
-            float slopeFactor = uDisplacementScale * uShowMountainRelief * 13.5;
-            vec3 slopeNorm = normalize(vec3((hL - hR) * slopeFactor, 1.0, (hD - hU) * slopeFactor));
-            vNormal = normalize(mat3(modelMatrix) * slopeNorm);
-          } 
-          // 2. Real 3D Physical Ocean Waves (Undulating surface with smooth crests and analytical normals)
-          else {
+          if (r > 57.9) {
+            // Vast outer ocean beyond Antarctica (strictly 0 elevation, completely flat sea level)
+            vElevation = 0.0;
+            vNormal = normalize(mat3(modelMatrix) * vec3(0.0, 1.0, 0.0));
             if (uShowOceanWaves > 0.5) {
-              Wave3D wave = getPhysical3DWaves(pos.xz, uv, elev, uTime, uOceanAgitationMode, uOceanWaveHeight, uDisplacementMap);
+              Wave3D wave = getPhysical3DWaves(pos.xz, uv, 0.0, uTime, uOceanAgitationMode, uOceanWaveHeight, uDisplacementMap);
               pos.y = min(pos.y + wave.height, 0.0);
-
               vec3 waterSlopeNorm = normalize(vec3(-wave.grad.x, 1.0, -wave.grad.y));
               vNormal = normalize(mat3(modelMatrix) * waterSlopeNorm);
-            } else {
-              vNormal = normalize(mat3(modelMatrix) * vec3(0.0, 1.0, 0.0));
+            }
+          } else {
+            float elev = texture2D(uDisplacementMap, uv).r;
+            vElevation = elev;
+
+            vec2 texel = vec2(1.0 / 1024.0, 1.0 / 1024.0);
+            float hL = texture2D(uDisplacementMap, uv - vec2(texel.x, 0.0)).r;
+            float hR = texture2D(uDisplacementMap, uv + vec2(texel.x, 0.0)).r;
+            float hD = texture2D(uDisplacementMap, uv - vec2(0.0, texel.y)).r;
+            float hU = texture2D(uDisplacementMap, uv + vec2(0.0, texel.y)).r;
+
+            // 1. Continental terrain elevation displacement
+            if (elev > 0.028) {
+              float normH = (elev - 0.028) / 0.972;
+              float h = pow(normH, 1.15) * uDisplacementScale * uShowMountainRelief * 1.3125;
+              pos.y += h;
+
+              float slopeFactor = uDisplacementScale * uShowMountainRelief * 13.5;
+              vec3 slopeNorm = normalize(vec3((hL - hR) * slopeFactor, 1.0, (hD - hU) * slopeFactor));
+              vNormal = normalize(mat3(modelMatrix) * slopeNorm);
+            } 
+            // 2. Real 3D Physical Ocean Waves (Undulating surface with smooth crests and analytical normals)
+            else {
+              if (uShowOceanWaves > 0.5) {
+                Wave3D wave = getPhysical3DWaves(pos.xz, uv, elev, uTime, uOceanAgitationMode, uOceanWaveHeight, uDisplacementMap);
+                pos.y = min(pos.y + wave.height, 0.0);
+
+                vec3 waterSlopeNorm = normalize(vec3(-wave.grad.x, 1.0, -wave.grad.y));
+                vNormal = normalize(mat3(modelMatrix) * waterSlopeNorm);
+              } else {
+                vNormal = normalize(mat3(modelMatrix) * vec3(0.0, 1.0, 0.0));
+              }
             }
           }
 
@@ -875,6 +888,10 @@ export const PlanarCanvas: React.FC = () => {
           vec3 finalColor = mix(illuminatedNightTerrain + activeCityLights, sunlitTerrain, daylight);
 
           // 5. Authentic Physical Ocean Fluid Optics (NASA-style Sunglint & Fresnel)
+          // Na área externa além da Antártida (r > 58.0), suprime reflexos especulares e arcos direcionais
+          // garantindo um oceano homogêneo, azul-marinho profundo e idêntico por toda a extensão
+          float innerOceanOptics = 1.0 - smoothstep(57.2, 58.2, r);
+
           if (isWater > 0.01 && uShowRealisticWater > 0.5) {
             vec3 viewDir = normalize(cameraPosition - vWorldPosition);
             vec3 sunDir = normalize(uSunPos - vWorldPosition);
@@ -885,11 +902,11 @@ export const PlanarCanvas: React.FC = () => {
               vec3 halfVec = normalize(sunDir + viewDir);
               float NdotH = max(0.0, dot(waterNormal, halfVec));
 
-              // Calibrated natural Sunglint: Soft dual-lobe distribution without harsh blown-out spots
+              // Calibrated natural Sunglint (restrito aos oceanos internos da Terra)
               float broadGlint = pow(NdotH, 24.0) * 0.22;
               float coreGlint = pow(NdotH, 88.0) * 0.85;
 
-              float glintTotal = (broadGlint + coreGlint) * daylight * min(uSunIntensity, 1.25) * isWater;
+              float glintTotal = (broadGlint + coreGlint) * daylight * min(uSunIntensity, 1.25) * isWater * innerOceanOptics;
               vec3 sunReflection = vec3(1.0, 0.97, 0.90) * glintTotal;
               finalColor += sunReflection;
 
@@ -899,12 +916,12 @@ export const PlanarCanvas: React.FC = () => {
 
               // Reflected sky / atmospheric ambient tone
               vec3 reflectedSky = mix(vec3(0.01, 0.03, 0.07), vec3(0.20, 0.45, 0.72), daylight);
-              vec3 fresnelSheen = reflectedSky * (fresnel * 0.45) * isWater;
+              vec3 fresnelSheen = reflectedSky * (fresnel * 0.45 * mix(0.12, 1.0, innerOceanOptics)) * isWater;
               finalColor += fresnelSheen;
 
               // Subtle Subsurface Oceanic Glow
               float fwdScatter = max(0.0, dot(viewDir, -sunDir + vec3(0.0, 0.35, 0.0)));
-              vec3 subSurface = vec3(0.02, 0.14, 0.22) * pow(fwdScatter, 4.0) * daylight * min(uSunIntensity, 1.25) * isWater;
+              vec3 subSurface = vec3(0.02, 0.14, 0.22) * pow(fwdScatter, 4.0) * daylight * min(uSunIntensity, 1.25) * isWater * innerOceanOptics;
               finalColor += subSurface;
             }
 
@@ -914,13 +931,13 @@ export const PlanarCanvas: React.FC = () => {
               vec3 halfMoonVec = normalize(moonLightDir + viewDir);
               float NdotHMoon = max(0.0, dot(waterNormal, halfMoonVec));
 
-              float moonGlint = (pow(NdotHMoon, 20.0) * 0.18 + pow(NdotHMoon, 75.0) * 0.65) * effectiveMoonlight * 0.05 * isWater;
+              float moonGlint = (pow(NdotHMoon, 20.0) * 0.18 + pow(NdotHMoon, 75.0) * 0.65) * effectiveMoonlight * 0.05 * isWater * innerOceanOptics;
               vec3 moonReflection = vec3(0.60, 0.80, 1.0) * moonGlint;
               finalColor += moonReflection;
 
               float NdotVMoon = clamp(dot(waterNormal, viewDir), 0.0, 1.0);
               float moonFresnel = 0.02 + 0.98 * pow(1.0 - NdotVMoon, 4.0);
-              finalColor += vec3(0.04, 0.08, 0.15) * moonFresnel * effectiveMoonlight * 0.05 * isWater;
+              finalColor += vec3(0.04, 0.08, 0.15) * moonFresnel * effectiveMoonlight * 0.05 * isWater * mix(0.12, 1.0, innerOceanOptics);
             }
 
             // Soft natural beach surf foam (delicate translucent foam only along the waterline touching the coast)
