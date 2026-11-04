@@ -2,41 +2,55 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { execSync } from 'child_process';
+import { spawn } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = parseInt(process.env.PORT, 10) || 3000;
+const host = '0.0.0.0';
 const distDir = path.join(__dirname, 'dist');
 const indexHtml = path.join(distDir, 'index.html');
 
 let isBuilding = false;
+let buildError = null;
 
-function ensureBuild() {
-  if (fs.existsSync(indexHtml)) return true;
-  if (isBuilding) return false;
-
+function runAsyncBuild() {
+  if (fs.existsSync(indexHtml) || isBuilding) return;
   isBuilding = true;
-  console.log('[Server] Pasta dist/ não encontrada. Iniciando compilação automática com Vite...');
-  try {
-    execSync('npm run build', {
-      cwd: __dirname,
-      stdio: 'inherit',
-      env: { ...process.env, NODE_OPTIONS: '--max-old-space-size=2048' }
-    });
-    console.log('[Server] Compilação automática concluída com sucesso!');
+  buildError = null;
+  console.log('[Server] Pasta dist/ não encontrada. Iniciando compilação assíncrona com Vite...');
+
+  const child = spawn('npm', ['run', 'build'], {
+    cwd: __dirname,
+    stdio: 'inherit',
+    env: { ...process.env, NODE_OPTIONS: '--max-old-space-size=2048' }
+  });
+
+  child.on('close', (code) => {
     isBuilding = false;
-    return true;
-  } catch (err) {
-    console.error('[Server] Falha na compilação:', err);
+    if (code === 0 && fs.existsSync(indexHtml)) {
+      console.log('[Server] Compilação Vite concluída com sucesso!');
+    } else {
+      buildError = `Build process exited with code ${code}`;
+      console.error('[Server] ' + buildError);
+    }
+  });
+
+  child.on('error', (err) => {
     isBuilding = false;
-    return false;
-  }
+    buildError = err.message;
+    console.error('[Server] Erro ao disparar build:', err);
+  });
 }
 
-// Serve static assets from dist
+// Health check endpoint for Render
+app.get('/healthz', (req, res) => {
+  res.status(200).send('OK');
+});
+
+// Serve static assets from dist whenever they exist
 app.use((req, res, next) => {
   if (fs.existsSync(distDir)) {
     return express.static(distDir)(req, res, next);
@@ -50,18 +64,18 @@ app.get('*', (req, res) => {
     return res.sendFile(indexHtml);
   }
 
-  // Tenta construir se ainda não existir
-  const built = ensureBuild();
-  if (built && fs.existsSync(indexHtml)) {
-    return res.sendFile(indexHtml);
+  // Se ainda não estiver construindo, dispara o build assíncrono em background
+  if (!isBuilding) {
+    runAsyncBuild();
   }
 
-  res.status(503).send(`
+  // Retorna SEMPRE HTTP 200 para evitar que o proxy do Render gere HTTP 502 Bad Gateway
+  res.status(200).send(`
     <!DOCTYPE html>
     <html lang="pt-BR">
       <head>
         <meta charset="utf-8" />
-        <meta http-equiv="refresh" content="6" />
+        <meta http-equiv="refresh" content="5" />
         <title>Simulador Astronômico Planar - Inicializando</title>
         <style>
           body {
@@ -87,8 +101,8 @@ app.get('*', (req, res) => {
             border: 3px solid rgba(56, 189, 248, 0.2);
             border-top: 3px solid #38bdf8;
             border-radius: 50%;
-            width: 36px;
-            height: 36px;
+            width: 40px;
+            height: 40px;
             animation: spin 1s linear infinite;
             margin: 0 auto 20px auto;
           }
@@ -98,21 +112,18 @@ app.get('*', (req, res) => {
       <body>
         <div class="box">
           <div class="spinner"></div>
-          <h2 style="margin: 0 0 12px 0; color: #38bdf8;">Compilando Simulador</h2>
-          <p style="color: #94a3b8; font-size: 14px; margin: 0 0 16px 0;">Os arquivos de produção 3D estão sendo preparados automaticamente na primeira execução...</p>
-          <p style="color: #64748b; font-size: 12px; margin: 0;">A página atualizará automaticamente em alguns segundos.</p>
+          <h2 style="margin: 0 0 12px 0; color: #38bdf8;">Inicializando Simulador</h2>
+          <p style="color: #94a3b8; font-size: 14px; margin: 0 0 16px 0;">Compilando arquivos 3D na primeira inicialização... Isso leva apenas alguns segundos.</p>
+          <p style="color: #64748b; font-size: 12px; margin: 0;">A página atualizará automaticamente assim que concluir.</p>
         </div>
       </body>
     </html>
   `);
 });
 
-app.listen(port, () => {
-  console.log(`Server listening on port ${port}`);
-  // Inicia o build em background se a pasta dist não existir, sem atrasar o bind da porta
+app.listen(port, host, () => {
+  console.log(`Server listening on ${host}:${port}`);
   if (!fs.existsSync(indexHtml)) {
-    setTimeout(() => {
-      ensureBuild();
-    }, 200);
+    runAsyncBuild();
   }
 });
