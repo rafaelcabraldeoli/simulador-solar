@@ -1382,8 +1382,7 @@ export const PlanarCanvas: React.FC = () => {
     moonShaderMatRef.current = moonShaderMat;
 
     const moonMesh = new THREE.Mesh(moonGeo, moonShaderMat);
-    moonMesh.renderOrder = 2;
-    moonGroup.renderOrder = 2;
+    moonMesh.renderOrder = 1;
     moonGroup.add(moonMesh);
 
     // Foco de Luz da Lua: Halo e coroa atmosférica proporcional DIRECIONAL
@@ -1454,7 +1453,7 @@ export const PlanarCanvas: React.FC = () => {
       `,
     });
     const moonHaloMesh = new THREE.Mesh(moonHaloGeo, moonHaloMat);
-    moonHaloMesh.renderOrder = 5;
+    moonHaloMesh.renderOrder = 1;
     moonHaloMesh.visible = false;
     moonHaloMeshRef.current = moonHaloMesh;
     moonHaloMatRef.current = moonHaloMat;

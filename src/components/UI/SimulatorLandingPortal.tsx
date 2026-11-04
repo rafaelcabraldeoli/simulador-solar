@@ -15,7 +15,6 @@ import {
   X,
   Play,
   ArrowRight,
-  ShieldCheck,
   Tv,
   ShoppingBag,
   Award,
@@ -822,16 +821,6 @@ export const SimulatorLandingPortal: React.FC = () => {
           <span>•</span>
           <button onClick={handleLaunchGlobe} className="hover:text-indigo-400 transition">
             Modo Globo
-          </button>
-          <span>•</span>
-          {/* Acesso discreto e exclusivo para o Dono acessar o Manual de Monetização */}
-          <button
-            onClick={() => setShowGuideModal(true)}
-            title="Acesso do Administrador: Manual com estratégias para lucrar com o sistema"
-            className="text-slate-500 hover:text-emerald-400 flex items-center gap-1 transition"
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span className="text-[11px]">Área do Dono</span>
           </button>
         </div>
       </footer>

@@ -586,7 +586,7 @@ export function createAtmosphericClouds3D(scene: THREE.Scene): CloudSystem3D {
   });
 
   const humanCloudDomeMesh = new THREE.Mesh(humanCloudDomeGeo, humanCloudMat);
-  humanCloudDomeMesh.renderOrder = 15; // Tropospheric clouds pass in front of Sun and Moon (renderOrder 0-3), covering them realistically
+  humanCloudDomeMesh.renderOrder = 20; // Tropospheric clouds pass in front of Sun (0) and Moon (1), covering them realistically
   humanCloudDomeMesh.visible = false;
   group.add(humanCloudDomeMesh);
 
