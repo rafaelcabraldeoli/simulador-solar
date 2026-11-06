@@ -218,22 +218,6 @@ export const HumanObserverHUD: React.FC<HumanObserverHUDProps> = ({ isGlobeMode 
 
     const sinMoonAlt = normX * mx + normY * my + normZ * mz;
     moonElevDeg = (Math.asin(Math.max(-1, Math.min(1, sinMoonAlt))) * 180) / Math.PI;
-
-    // In Spherical Globe Mode, if an active solar eclipse is occurring for this observer,
-    // the Moon transits across the Sun so its altitude matches the Sun!
-    const catalogEclipse = findMatchingCatalogEclipse(currentDate);
-    if (catalogEclipse?.type === 'solar') {
-      const diffSec = (currentDate.getTime() - catalogEclipse.date.getTime()) / 1000;
-      const dLatRad = (settings.observerLat - catalogEclipse.lat) * (Math.PI / 180);
-      const dLngRad = (settings.observerLng - catalogEclipse.lng) * (Math.PI / 180);
-      const cLat1 = Math.cos(settings.observerLat * (Math.PI / 180));
-      const cLat2 = Math.cos(catalogEclipse.lat * (Math.PI / 180));
-      const hav = Math.sin(dLatRad / 2) ** 2 + cLat1 * cLat2 * Math.sin(dLngRad / 2) ** 2;
-      const geoDistDeg = 2 * Math.asin(Math.sqrt(Math.min(1.0, hav))) * (180 / Math.PI);
-      if (Math.abs(diffSec) <= 4500 && geoDistDeg <= 35.0) {
-        moonElevDeg = sunElevDeg;
-      }
-    }
   }
 
   // Daylight state based on apparent solar altitude

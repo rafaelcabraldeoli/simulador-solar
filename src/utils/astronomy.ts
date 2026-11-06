@@ -418,8 +418,6 @@ export function calculateAstroPositions(
     if (absDiff <= 3.5) {
       if (catalogMatch.type === 'lunar') {
         isCatalogLunarEclipse = true;
-        // In a lunar eclipse, the Moon is locked in direct opposition with the Sun (180° away)
-        moonAngleDeg = (sunAngleDeg + 180) % 360;
       }
     }
   }
@@ -435,40 +433,6 @@ export function calculateAstroPositions(
   let moonAngleRad = (moonAngleDeg * Math.PI) / 180;
   let moonX = moonRadius * Math.cos(moonAngleRad);
   let moonZ = moonRadius * Math.sin(moonAngleRad); // Clockwise
-
-  // If eclipseTheory is 'moon_eclipses_sun', the Moon follows its natural continuous orbital trajectory
-  // that intersects the observer-Sun line of sight smoothly, without artificial vertical drops or jumps
-  if (settings.eclipseTheory === 'moon_eclipses_sun' && catalogMatch && catalogMatch.type === 'solar') {
-    const diffHours = (date.getTime() - catalogMatch.date.getTime()) / (1000 * 3600);
-    const absDiff = Math.abs(diffHours);
-    if (absDiff <= 3.5) {
-      // Observer coordinates on the flat Earth plane (Y = 0)
-      const obsGround = geoToPlanarCoords(settings.observerLat, settings.observerLng);
-      // Collinear conjunction point at Moon's altitude (Y = moonY) along line of sight to Sun
-      const hFrac = moonY / Math.max(0.1, sunY);
-      const centerMoonX = obsGround.x + hFrac * (sunX - obsGround.x);
-      const centerMoonZ = obsGround.z + hFrac * (sunZ - obsGround.z);
-
-      // Horizontal orbital tangent vector (East-to-West diurnal circuit)
-      const tX = -Math.sin(sunAngleRad);
-      const tZ = Math.cos(sunAngleRad);
-
-      // Natural orbital transit speed: passes smoothly across the Sun over ~2.5 hours
-      const transitSpeed = 1.05;
-      const alignedMoonX = centerMoonX + (diffHours * transitSpeed) * tX;
-      const alignedMoonZ = centerMoonZ + (diffHours * transitSpeed) * tZ;
-      const alignedMoonY = moonY; // Steady, constant altitude: ZERO vertical drop or rise!
-
-      // Smooth cosine-squared blend (continuous velocity, zero jerk)
-      const blendWeight = Math.cos((absDiff / 3.5) * (Math.PI / 2)) ** 2;
-      moonX = moonX * (1.0 - blendWeight) + alignedMoonX * blendWeight;
-      moonZ = moonZ * (1.0 - blendWeight) + alignedMoonZ * blendWeight;
-      moonY = moonY * (1.0 - blendWeight) + alignedMoonY * blendWeight;
-      moonRadius = Math.hypot(moonX, moonZ);
-      moonAngleDeg = (Math.atan2(moonZ, moonX) * (180 / Math.PI) + 360) % 360;
-      moonAngleRad = (moonAngleDeg * Math.PI) / 180;
-    }
-  }
 
   // Moon Phase calculation (angle difference between Sun and Moon)
   let phaseAngle = ((sunAngleDeg - moonAngleDeg) * Math.PI) / 180;

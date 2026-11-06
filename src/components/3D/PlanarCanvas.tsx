@@ -2560,48 +2560,8 @@ export const PlanarCanvas: React.FC = () => {
 
       const isMoonEclipsingSun = (store.settings.eclipseTheory === 'moon_eclipses_sun') && (eclipseInfo.isSolarEclipseActive || isCatalogSolarEclipseTransit);
 
-      let moonSky: {
-        position: { x: number; y: number; z: number };
-        altitudeDeg: number;
-        azimuthDeg: number;
-        isAboveHorizon: boolean;
-        distToObserver: number;
-      };
-
-      if (isCatalogSolarEclipseTransit && eclipseBlend > 0.001) {
-        const eyeY = 0.05 + Math.max(0.00004, humanEyeHeightRef.current);
-        _vToSun.set(
-          sunSky.position.x - obsGround.x,
-          sunSky.position.y - eyeY,
-          sunSky.position.z - obsGround.z
-        );
-        const distToSunVec = Math.max(0.1, _vToSun.length());
-        _vSunDir.copy(_vToSun).normalize();
-
-        // Vetor de trânsito orbital perpendicular no plano horizontal
-        _vTransit.crossVectors(_vSunDir, _vUp).normalize();
-
-        const sunWorldRad = 0.52;
-        const skyTransitOffset = transitProgress * (sunWorldRad * 2.10);
-
-        _vMoonEyePos.set(obsGround.x, eyeY, obsGround.z)
-          .addScaledVector(_vSunDir, distToSunVec - 0.35)
-          .addScaledVector(_vTransit, skyTransitOffset);
-
-        moonSky = {
-          position: {
-            x: THREE.MathUtils.lerp(normalMoonSky.position.x, _vMoonEyePos.x, eclipseBlend),
-            y: THREE.MathUtils.lerp(normalMoonSky.position.y, _vMoonEyePos.y, eclipseBlend),
-            z: THREE.MathUtils.lerp(normalMoonSky.position.z, _vMoonEyePos.z, eclipseBlend),
-          },
-          altitudeDeg: THREE.MathUtils.lerp(normalMoonSky.altitudeDeg, sunSky.altitudeDeg, eclipseBlend),
-          azimuthDeg: THREE.MathUtils.lerp(normalMoonSky.azimuthDeg, sunSky.azimuthDeg, eclipseBlend),
-          isAboveHorizon: sunSky.isAboveHorizon,
-          distToObserver: distToSunVec - 0.35,
-        };
-      } else {
-        moonSky = normalMoonSky;
-      }
+      // Posição contínua da Lua no circuito celeste natural (sem saltos artificiais fora da trajetória):
+      const moonSky = normalMoonSky;
 
       // Sun Light On/Off status (Apagar Luz do Sol)
       const isSunLit = store.settings.sunLightEnabled !== false;

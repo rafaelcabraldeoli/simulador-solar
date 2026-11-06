@@ -1668,14 +1668,14 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
             vec3 closestMoonPt = vWorldPosition + L * projMoon;
             float perpDistToMoon = length(uMoonWorldPosition - closestMoonPt);
             // Authentic astronomical solar eclipse shadow on Earth:
-            // Umbra radius = ~0.038 (240 km totality zone)
-            // Penumbra radius = ~0.30 (1900 km partial eclipse zone)
-            float umbraRad = 0.038;
-            float penumbraRad = 0.30;
+            // Umbra radius = ~0.075 (totality zone, deep dark core)
+            // Penumbra radius = ~0.36 (partial eclipse shadow penumbra zone)
+            float umbraRad = 0.075;
+            float penumbraRad = 0.36;
             if (perpDistToMoon < penumbraRad) {
               float penumbra = smoothstep(umbraRad, penumbraRad, perpDistToMoon);
               float umbra = smoothstep(0.0, umbraRad, perpDistToMoon);
-              moonShadowFactor = mix(0.02, 0.65 + 0.35 * penumbra, umbra);
+              moonShadowFactor = mix(0.015, mix(0.18, 1.0, penumbra), umbra);
             }
           }
 
@@ -1692,11 +1692,13 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
             }
           }
 
-          // Strict day/night hemisphere cutoff: night side where sunlight does not reach has ZERO light (0.0)
-          float dayFactor = smoothstep(0.0, 0.12, ndotl) * uSunLightEnabled * moonShadowFactor;
+          // Strict day/night hemisphere cutoff
+          float dayFactor = smoothstep(0.0, 0.12, ndotl) * uSunLightEnabled;
           if (uFullDaylight > 0.5 && uSunLightEnabled > 0.5) {
             dayFactor = 1.0;
           }
+          // The astronomical solar eclipse shadow blocks sunlight regardless of 100% Claro mode:
+          dayFactor *= moonShadowFactor;
 
           // Subtle Cloud Shadow cast onto land & ocean slightly offset away from the Sun
           float cloudShadow = 1.0;
@@ -1709,6 +1711,9 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
           float twilightBand = smoothstep(0.0, 0.04, ndotl) * (1.0 - smoothstep(0.04, 0.18, ndotl)) * uSunLightEnabled * (1.0 - uFullDaylight);
 
           float diffuse = pow(max(0.0, ndotl), 0.78);
+          if (uFullDaylight > 0.5) {
+            diffuse = mix(0.85, 1.0, max(0.0, ndotl));
+          }
           vec3 dayLit = baseMapColor * (diffuse * uSunIntensity * 0.92 * dayFactor * cloudShadow);
 
           // Aerial Rayleigh atmospheric blue perspective across the sunlit Earth surface (stronger towards the limb!)
@@ -1719,6 +1724,7 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
 
           vec3 twilightColor = baseMapColor * vec3(1.38, 0.58, 0.22) * 1.15;
           vec3 finalColor = mix(dayLit, twilightColor, twilightBand * 0.65);
+          finalColor *= mix(moonShadowFactor, 1.0, 0.04);
 
           if (uShowRealisticWater > 0.5 && isOcean > 0.1 && dayFactor > 0.05) {
             vec3 H = normalize(L + V);
@@ -1917,17 +1923,18 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
           if (projMoon > 0.0) {
             vec3 closestMoonPt = vWorldPosition + L * projMoon;
             float perpDist = length(uMoonWorldPosition - closestMoonPt);
-            float umbraRad = 0.038;
-            float penumbraRad = 0.30;
+            float umbraRad = 0.075;
+            float penumbraRad = 0.36;
             if (perpDist < penumbraRad) {
               float penumbra = smoothstep(umbraRad, penumbraRad, perpDist);
               float umbra = smoothstep(0.0, umbraRad, perpDist);
-              moonShadow = mix(0.02, 0.65 + 0.35 * penumbra, umbra);
+              moonShadow = mix(0.015, mix(0.18, 1.0, penumbra), umbra);
             }
           }
 
-          float dayCloud = smoothstep(-0.04, 0.14, ndotl) * uSunLightEnabled * moonShadow;
+          float dayCloud = smoothstep(-0.04, 0.14, ndotl) * uSunLightEnabled;
           if (uFullDaylight > 0.5 && uSunLightEnabled > 0.5) dayCloud = 1.0;
+          dayCloud *= moonShadow;
 
           // Calibrated pure-white cloud arc under the Sun (-20% from previous wide arc)
           float whiteSunArc = smoothstep(0.14, 0.46, ndotl);
@@ -1941,6 +1948,7 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
 
           vec3 col = mix(nightCloud, pureWhiteCloud * (0.74 + 0.36 * max(0.0, ndotl)), dayCloud);
           col = mix(col, sunsetCloud, twilightCloud * 0.82);
+          col *= mix(moonShadow, 1.0, 0.05);
 
           float alpha = density * viewFacing * mix(0.16, 0.84, max(dayCloud, twilightCloud * 0.8));
           gl_FragColor = vec4(col, alpha);
@@ -3577,45 +3585,10 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
       );
       const lunarPhaseAngle = lunarTelemetry.synodicPhaseRad;
 
+      // Pure, continuous, unbroken 3D orbital mechanics:
+      // The Moon stays strictly on its physical orbit (inclined 5.14° with 18.6-year nodal precession)
+      // and NEVER jumps or lerps off its trajectory!
       moonGroup.position.copy(lunarTelemetry.position3D);
-
-      // Pinpoint shadow projection on the Earth globe during catalog solar/lunar eclipses
-      const macroCatalogEclipse = findMatchingCatalogEclipse(currentDate);
-      if (macroCatalogEclipse) {
-        const diffSec = (currentDate.getTime() - macroCatalogEclipse.date.getTime()) / 1000;
-        if (Math.abs(diffSec) <= 5400) {
-          const blendWeight = Math.cos((diffSec / 5400.0) * (Math.PI / 2)) ** 2;
-          if (macroCatalogEclipse.type === 'solar') {
-            latLngToSphereVector(
-              macroCatalogEclipse.lat,
-              macroCatalogEclipse.lng,
-              GLOBE_RADIUS,
-              _scratchV1
-            );
-            _scratchV2.copy(_scratchV1).applyMatrix4(earthSpinGroup.matrixWorld); // eclipseSpotWorld
-            // Ray from the eclipse location on Earth towards the central Sun (0, 0, 0)
-            _scratchV3.copy(_scratchV2).negate().normalize(); // dirSpotToSun
-            _scratchV4.subVectors(_scratchV2, earthSystemGroup.position); // v
-            const vDotU = _scratchV4.dot(_scratchV3);
-            const d = -vDotU + Math.sqrt(vDotU * vDotU + (moonOrbitRadius * moonOrbitRadius - 1.0));
-            _scratchV5.copy(_scratchV2).addScaledVector(_scratchV3, d); // moonAtTotalityWorld
-            _scratchV6.subVectors(_scratchV5, earthSystemGroup.position); // alignedMoonPos
-
-            _scratchV7.set(0, 1, 0).applyQuaternion(earthTiltGroup.quaternion).normalize(); // northAxis
-            _scratchV8.crossVectors(_scratchV7, _scratchV3).normalize(); // orbitTangent
-            const transitProgress = diffSec / 4500.0;
-            _scratchV6.addScaledVector(_scratchV8, transitProgress * 0.32);
-            moonGroup.position.lerp(_scratchV6, blendWeight);
-          } else if (macroCatalogEclipse.type === 'lunar') {
-            _scratchV1.copy(earthSystemGroup.position).normalize(); // dirEarthAntiSun
-            _scratchV2.copy(_scratchV1).multiplyScalar(moonOrbitRadius); // alignedMoonPos
-            _scratchV3.set(0, 1, 0).applyQuaternion(earthTiltGroup.quaternion).normalize(); // northAxis
-            _scratchV4.crossVectors(_scratchV3, _scratchV1).normalize(); // orbitTangent
-            _scratchV2.addScaledVector(_scratchV4, (diffSec / 5400.0) * 0.35);
-            moonGroup.position.lerp(_scratchV2, blendWeight);
-          }
-        }
-      }
 
       moonOrbitGroup.quaternion.copy(lunarTelemetry.orbitPlaneQuaternion);
       const showNodesNow = Boolean(cfg.showLunarNodes) && !isHumanSurface;
