@@ -4173,9 +4173,7 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
           Boolean(store.layers.showConstellationLabels),
           store.layers.constellationLineColor || 'cyan',
           store.layers.constellationLineOpacity ?? 0.85,
-          store.layers.selectedConstellation,
-          true,
-          solarTotalityFactor
+          store.layers.selectedConstellation
         );
 
         // Delegate to centralized humanCameraController (Zero chord-shortcut through zenith, rectilinear FOV)

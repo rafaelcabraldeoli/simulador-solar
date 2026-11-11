@@ -2812,23 +2812,9 @@ export function generateSolarCoronaTexture(): THREE.CanvasTexture {
     ctx.lineWidth = 1.0;
     ctx.beginPath();
     ctx.moveTo(cx + Math.cos(angle) * solarRadius, cy + Math.sin(angle) * solarRadius);
+    ctx.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len);
     ctx.stroke();
   }
-
-  // 5. Punch out the center of the Moon disc so the interior is 100% PITCH BLACK and completely transparent!
-  // Eliminates the bright central white light artifact caused by Canvas radial gradients:
-  ctx.save();
-  ctx.globalCompositeOperation = 'destination-out';
-  const holeRadius = solarRadius * 0.98;
-  const holeGrad = ctx.createRadialGradient(cx, cy, holeRadius * 0.85, cx, cy, holeRadius);
-  holeGrad.addColorStop(0.0, 'rgba(0, 0, 0, 1.0)');
-  holeGrad.addColorStop(0.85, 'rgba(0, 0, 0, 1.0)');
-  holeGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0.0)');
-  ctx.fillStyle = holeGrad;
-  ctx.beginPath();
-  ctx.arc(cx, cy, holeRadius, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.needsUpdate = true;
