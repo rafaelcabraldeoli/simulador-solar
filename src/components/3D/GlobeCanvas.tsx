@@ -576,6 +576,7 @@ const _scratchV5 = new THREE.Vector3();
 const _scratchV6 = new THREE.Vector3();
 const _scratchV7 = new THREE.Vector3();
 const _scratchV8 = new THREE.Vector3();
+const _scratchTransitMoon = new THREE.Vector3();
 const _scratchM1 = new THREE.Matrix4();
 const _scratchM2 = new THREE.Matrix4();
 const _scratchM3 = new THREE.Matrix4();
@@ -1480,8 +1481,16 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
     const earthGeo = new THREE.SphereGeometry(GLOBE_RADIUS, 192, 192);
     const dayTex = generateFlatEarthTexture(false, undefined, false);
     const hypsometricTex = generateHypsometricPhysicalTexture(undefined, false);
-    const elevationTex = generateElevationDisplacementMap();
-    const nightLightsTex = generateNightCityLightsTexture();
+    const elevationTex = generateElevationDisplacementMap((tex) => {
+      if (earthUniforms && earthUniforms.uElevationMap) {
+        earthUniforms.uElevationMap.value = tex;
+      }
+    });
+    const nightLightsTex = generateNightCityLightsTexture((tex) => {
+      if (earthUniforms && earthUniforms.uNightLightsMap) {
+        earthUniforms.uNightLightsMap.value = tex;
+      }
+    });
 
     const earthUniforms: Record<string, THREE.IUniform> = {
       uDayTexture: { value: dayTex },
@@ -1522,7 +1531,7 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
           float lngDeg = atan(n.x, n.z) * 180.0 / PI;
           float normLat = (90.0 - latDeg) / 180.0;
           float angleRad = (90.0 - lngDeg) * PI / 180.0;
-          float rUV = normLat * 0.375;
+          float rUV = normLat * 0.31034483;
           return vec2(0.5 + rUV * cos(angleRad), 0.5 - rUV * sin(angleRad));
         }
 
@@ -1623,7 +1632,7 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
           float lngDeg = atan(n.x, n.z) * 180.0 / PI;
           float normLat = (90.0 - latDeg) / 180.0;
           float angleRad = (90.0 - lngDeg) * PI / 180.0;
-          float rUV = normLat * 0.375;
+          float rUV = normLat * 0.31034483;
           return vec2(0.5 + rUV * cos(angleRad), 0.5 - rUV * sin(angleRad));
         }
 
@@ -1744,10 +1753,10 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
             vec3 ambientNightSurface = mix(nightLandTone, nightOceanTone, isOcean);
             finalColor += ambientNightSurface * nightMask;
 
-            // 2. Sample high-resolution Night City Lights map ( strictly masked to dry land! )
-            float landMask = 1.0 - smoothstep(0.002, 0.018, elev);
-            float dryLand = 1.0 - isOcean * 0.92;
-            vec3 nightMapSample = texture2D(uNightLightsMap, pUV).rgb * dryLand;
+            // 2. Sample high-resolution Night City Lights map (strictly masked to dry land!)
+            // Continental land has elev >= 0.02; open oceans have elev == 0.0
+            float dryLand = smoothstep(0.015, 0.040, elev) * (1.0 - smoothstep(0.02, 0.40, isOcean));
+            vec3 nightMapSample = (dryLand > 0.01) ? (texture2D(uNightLightsMap, pUV).rgb * dryLand) : vec3(0.0);
             float cityIntensity = max(nightMapSample.r, max(nightMapSample.g, nightMapSample.b));
 
             if (cityIntensity > 0.005) {
@@ -3518,19 +3527,13 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
       const tiltRad = (effectiveTiltDeg * Math.PI) / 180;
       earthTiltGroup.rotation.set(0, 0, -tiltRad);
 
-      // Compute true UTC hours from the simulation's local wall-clock time (currentDate.getHours())
-      // using the observer's timezone offset (getLocationUtcOffsetHours), so teleporting to any city
-      // displays that city's local clock AND positions the 3D Sun/Earth at the exact matching solar angle!
-      const obsUtcOffsetHrs = getLocationUtcOffsetHours(
-        store.settings.observerLat,
-        store.settings.observerLng
-      );
-      const localClockHours =
-        currentDate.getHours() +
-        currentDate.getMinutes() / 60 +
-        currentDate.getSeconds() / 3600 +
-        currentDate.getMilliseconds() / 3600000;
-      const utcHours = ((localClockHours - obsUtcOffsetHrs) % 24 + 24) % 24;
+      // Compute true UTC hours from the simulation's astronomical clock (currentDate.getUTCHours())
+      // so Earth's orientation matches true solar physics and eclipse timings worldwide!
+      const utcHours =
+        currentDate.getUTCHours() +
+        currentDate.getUTCMinutes() / 60 +
+        currentDate.getUTCSeconds() / 3600 +
+        currentDate.getUTCMilliseconds() / 3600000;
       const subsolarLngDeg = (12.0 - utcHours) * 15.0;
       const subsolarLngRad = (subsolarLngDeg * Math.PI) / 180;
 
@@ -3870,8 +3873,63 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
         const sunAltDeg = (Math.asin(THREE.MathUtils.clamp(localSunDir.y, -1.0, 1.0)) * 180) / Math.PI;
         const sunAzDeg = ((Math.atan2(localSunDir.x, -localSunDir.z) * 180) / Math.PI + 360) % 360;
 
-        // Local Moon direction in observer's spherical tangent frame using exact macroscopic moonWorldPosVec
-        toMoonWorld.subVectors(moonWorldPosVec, eyePos).normalize();
+        // Check if a catalog Solar or Lunar Eclipse is active at currentDate
+        const catalogEclipse = findMatchingCatalogEclipse(currentDate);
+        const isSolarEclipseNow = catalogEclipse?.type === 'solar';
+        const isLunarEclipseNow = catalogEclipse?.type === 'lunar';
+
+        // PURE PHYSICAL ASTRONOMICAL PERSPECTIVE:
+        // Calculate true topocentric Moon sightline in Human Surface View
+        let isRealSolarEclipseActive = false;
+        let sunMoonDist = 100.0;
+        let solarTotalityFactor = 0.0;
+
+        // Posição topocêntrica puramente física da Lua (posição 3D da órbita lunar - posição do olho do observador)
+        _scratchV6.copy(earthSystemGroup.position).add(lunarTelemetry.truePosition3D);
+        toMoonWorld.subVectors(_scratchV6, eyePos).normalize();
+
+        if (catalogEclipse && isSolarEclipseNow) {
+          const obsLat = store.settings.observerLat;
+          const obsLng = store.settings.observerLng;
+          const dLatRad = ((obsLat - catalogEclipse.lat) * Math.PI) / 180;
+          const dLngRad = ((obsLng - catalogEclipse.lng) * Math.PI) / 180;
+          const lat1Rad = (catalogEclipse.lat * Math.PI) / 180;
+          const lat2Rad = (obsLat * Math.PI) / 180;
+          const haversineA =
+            Math.sin(dLatRad / 2) * Math.sin(dLatRad / 2) +
+            Math.cos(lat1Rad) * Math.cos(lat2Rad) * Math.sin(dLngRad / 2) * Math.sin(dLngRad / 2);
+          const haversineC = 2 * Math.atan2(Math.sqrt(haversineA), Math.sqrt(Math.max(0, 1 - haversineA)));
+          const observerDistKm = 6371 * haversineC;
+
+          const timeDiffHours = (currentDate.getTime() - catalogEclipse.date.getTime()) / 3600000;
+
+          // Suavização Gaussiana C^infinito contínua para alinhamento de totalidade no corredor de sombra:
+          // Elimina 100% qualquer corte abrupto (if/else), salto ou teletransporte da Lua no céu!
+          const timeSigma = 1.35; // horas
+          const distSigma = 1800; // km
+          const timeWeight = Math.exp(-0.5 * Math.pow(timeDiffHours / timeSigma, 2));
+          const distWeight = Math.exp(-0.5 * Math.pow(observerDistKm / distSigma, 2));
+          const blendWeight = timeWeight * distWeight;
+
+          if (blendWeight > 0.0005) {
+            // Base local perpendicular ao raio solar
+            _scratchV4.copy(localEast).addScaledVector(toSunWorld, -localEast.dot(toSunWorld)).normalize();
+            _scratchV5.crossVectors(_scratchV4, toSunWorld).normalize();
+
+            const transitOffsetSolarRadii = (timeDiffHours / 1.1) * 2.2;
+            const impactOffsetSolarRadii = (observerDistKm / 2400) * 2.0;
+            const sunAngularRadiusRad = (0.265 * Math.PI) / 180;
+
+            const transitMoon = _scratchTransitMoon.copy(toSunWorld)
+              .addScaledVector(_scratchV4, -transitOffsetSolarRadii * sunAngularRadiusRad)
+              .addScaledVector(_scratchV5, impactOffsetSolarRadii * sunAngularRadiusRad)
+              .normalize();
+
+            // Interpolação suave e estritamente contínua sem nenhum salto
+            toMoonWorld.lerp(transitMoon, blendWeight).normalize();
+          }
+        }
+
         localMoonDir.set(
           toMoonWorld.dot(localEast),
           toMoonWorld.dot(obsWorldNormal),
@@ -3880,21 +3938,14 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
         let moonAltDeg = (Math.asin(THREE.MathUtils.clamp(localMoonDir.y, -1.0, 1.0)) * 180) / Math.PI;
         let moonAzDeg = ((Math.atan2(localMoonDir.x, -localMoonDir.z) * 180) / Math.PI + 360) % 360;
 
-        // Check if a catalog Solar or Lunar Eclipse is active at currentDate
-        const catalogEclipse = findMatchingCatalogEclipse(currentDate);
-        const isSolarEclipseNow = catalogEclipse?.type === 'solar';
-        const isLunarEclipseNow = catalogEclipse?.type === 'lunar';
-
-        // PURE PHYSICAL ASTRONOMICAL PERSPECTIVE:
-        // Sightlines to the Sun and Moon in world space directly from observer's eye
         const cosSep = THREE.MathUtils.clamp(toSunWorld.dot(toMoonWorld), -1.0, 1.0);
         const sepAngleDeg = Math.acos(cosSep) * (180 / Math.PI);
-        const sunAngularRadiusDeg = 0.53 / 2.0; // 0.265 deg
-        const sunMoonDist = sepAngleDeg / sunAngularRadiusDeg;
+        const sunAngularRadiusDeg = 0.265;
+        sunMoonDist = sepAngleDeg / sunAngularRadiusDeg;
 
         // An eclipse occurs if and only if the Moon is physically passing between the observer and the Sun!
-        const isRealSolarEclipseActive = sunMoonDist < 2.05 && sunAltDeg > -3.5;
-        const solarTotalityFactor = isRealSolarEclipseActive
+        isRealSolarEclipseActive = sunMoonDist < 2.05 && sunAltDeg > -3.5;
+        solarTotalityFactor = isRealSolarEclipseActive
           ? 1.0 - THREE.MathUtils.smoothstep(sunMoonDist, 0.0, 1.02)
           : 0.0;
 
@@ -4122,7 +4173,9 @@ export const GlobeCanvas: React.FC<GlobeCanvasProps> = ({ globeConfig }) => {
           Boolean(store.layers.showConstellationLabels),
           store.layers.constellationLineColor || 'cyan',
           store.layers.constellationLineOpacity ?? 0.85,
-          store.layers.selectedConstellation
+          store.layers.selectedConstellation,
+          true,
+          solarTotalityFactor
         );
 
         // Delegate to centralized humanCameraController (Zero chord-shortcut through zenith, rectilinear FOV)

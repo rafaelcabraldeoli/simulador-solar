@@ -1020,6 +1020,7 @@ export class CelestialSphere3D {
         uHorizonAirglow: { value: new THREE.Color(0x06142a) },  // #06142a - Brilho atmosférico sutil no horizonte
         uTime: { value: 0.0 },
         uShowAtmosphereClouds: { value: 0.0 },
+        uSolarEclipseFactor: { value: 0.0 },
       },
       vertexShader: `
         varying vec3 vRayDirection;
@@ -1038,6 +1039,7 @@ export class CelestialSphere3D {
         uniform vec3 uMidnightBlue;
         uniform vec3 uVoidBlack;
         uniform vec3 uHorizonAirglow;
+        uniform float uSolarEclipseFactor;
         uniform float uTime;
         uniform float uShowAtmosphereClouds;
 
@@ -1090,9 +1092,11 @@ export class CelestialSphere3D {
             vec3 middayHorizon = vec3(0.24, 0.58, 0.96);
             vec3 middaySky = mix(middayHorizon, middayZenith, pow(elevation, 0.52));
             // Auréola e brilho de luz solar radiante no domo celeste (proporcional ao tamanho do disco da Lua)
-            float coreGlare = exp(-sunAngleRad * 65.0) * 0.72;
-            float aureoleGlare = exp(-pow(sunAngleRad * 18.0, 1.35)) * 0.36;
-            float wideGlare = exp(-pow(sunAngleRad * 5.0, 1.4)) * 0.12;
+            // Durante totalidade de eclipse solar, apaga o brilho do sol no domo de fundo para não vazar luz no centro
+            float eclipseDim = clamp(1.0 - uSolarEclipseFactor, 0.0, 1.0);
+            float coreGlare = exp(-sunAngleRad * 65.0) * 0.72 * eclipseDim;
+            float aureoleGlare = exp(-pow(sunAngleRad * 18.0, 1.35)) * 0.36 * eclipseDim;
+            float wideGlare = exp(-pow(sunAngleRad * 5.0, 1.4)) * 0.12 * eclipseDim;
 
             vec3 innerGold = vec3(1.0, 0.94, 0.55);
             vec3 outerAmber = vec3(1.0, 0.72, 0.22);
@@ -1422,7 +1426,8 @@ export class CelestialSphere3D {
     constellationLineColor: 'cyan' | 'gold' | 'white' | 'magenta' = 'cyan',
     constellationLineOpacity = 0.85,
     selectedConstellation: string | null = null,
-    showAtmosphereClouds = true
+    showAtmosphereClouds = true,
+    solarEclipseFactor = 0.0
   ) {
     this.group.visible = true;
     this.globalGroup.visible = false;
@@ -1445,6 +1450,7 @@ export class CelestialSphere3D {
       this.humanAtmosphereMat.uniforms.uMoonAltitude.value = (moonAltitudeDeg * Math.PI) / 180.0;
       this.humanAtmosphereMat.uniforms.uTime.value = time * 0.001;
       this.humanAtmosphereMat.uniforms.uShowAtmosphereClouds.value = showAtmosphereClouds ? 1.0 : 0.0;
+      this.humanAtmosphereMat.uniforms.uSolarEclipseFactor.value = solarEclipseFactor;
     }
 
     if (this.sphericalConstellationsGroup) {

@@ -136,46 +136,72 @@ export function calculateLunarOrbitWithNodalPrecession(
   const sunGeocentricAngleRad = earthOrbitAngleRad + Math.PI;
   const sunGeocentricLongitudeDeg = normalizeDeg((sunGeocentricAngleRad * 180) / Math.PI);
 
-  // Na época de referência (12/08/2026), calculamos o ângulo contínuo exato da Terra:
-  const refEarthOrbitAngleRad = getContinuousEarthOrbitAngleRad(new Date(REF_ECLIPSE_EPOCH_MS));
-  const refSunGeocentricLongitudeDeg = normalizeDeg(((refEarthOrbitAngleRad + Math.PI) * 180) / Math.PI);
+  // 2. EQUAÇÕES ASTRONÔMICAS DE ALTA PRECISÃO (Jean Meeus - Astronomical Algorithms, Ch. 47):
+  // Incorpora a Equação do Centro (+6.29°), Evectação (+1.27°), Variação (+0.66°) e perturbações orbitais
+  // para que a Lua e os Nodos fiquem estritamente contínuos e alinhados naturalmente em todas as sizígias
+  // sem nenhum salto discreto ou teletransporte artificial!
+  const jd = currentDate.getTime() / 86400000 + 2440587.5;
+  const T = (jd - 2451545.0) / 36525.0;
+  const rad = Math.PI / 180.0;
 
-  // 2. PRECESSÃO RETRÓGRADA DA LINHA DOS NODOS AO REDOR DO EIXO VERTICAL Y (-19.34°/ano = -0.05295°/dia):
-  // A rotação nodal altera exclusivamente o ângulo horizontal (azimute Ω) da Linha dos Nodos no espaço 3D,
-  // mantendo a inclinação de 5.14° intacta e fazendo as temporadas de eclipse recuarem ~18,6 dias a cada ano!
-  const nodalPrecessionDeltaDeg = deltaDays * NODAL_PRECESSION_RATE_DEG_PER_DAY; // -0.05295°/dia (-19.34°/ano)
-  const ascendingNodeLongitudeDeg = normalizeDeg(refSunGeocentricLongitudeDeg + nodalPrecessionDeltaDeg);
+  // Longitude eclíptica aparente do Sol segundo Meeus:
+  const L0 = normalizeDeg(280.46646 + 36000.76983 * T);
+  const M_sun = normalizeDeg(357.52911 + 35999.05029 * T);
+  const C_sun = (1.914602 - 0.004817 * T) * Math.sin(M_sun * rad) + 0.019993 * Math.sin(2 * M_sun * rad);
+  const meeusSunLongDeg = normalizeDeg(L0 + C_sun);
+
+  // Argumentos fundamentais lunares (Meeus Ch. 47):
+  const Lp = normalizeDeg(218.3164477 + 481267.88123421 * T - 0.0015786 * T * T);
+  const D = normalizeDeg(297.8501921 + 445267.1114034 * T - 0.0018819 * T * T);
+  const M_sun_arg = normalizeDeg(357.5291092 + 35999.0502909 * T - 0.0001536 * T * T);
+  const Mp = normalizeDeg(134.9633964 + 477198.8675055 * T + 0.0087414 * T * T);
+  const F = normalizeDeg(93.2720950 + 483202.0175233 * T - 0.0036539 * T * T);
+  const Omega = normalizeDeg(125.04452 - 1934.136261 * T + 0.0020708 * T * T);
+
+  // Termos periódicos de perturbação na longitude lunar (dL em graus):
+  const dL =
+    6.288774 * Math.sin(Mp * rad) +
+    1.274027 * Math.sin((2 * D - Mp) * rad) +
+    0.658314 * Math.sin(2 * D * rad) +
+    0.213618 * Math.sin(2 * Mp * rad) -
+    0.185116 * Math.sin(M_sun_arg * rad) -
+    0.114332 * Math.sin(2 * F * rad) +
+    0.058793 * Math.sin((2 * D - 2 * Mp) * rad) +
+    0.057066 * Math.sin((2 * D - M_sun_arg - Mp) * rad) +
+    0.053322 * Math.sin((2 * D + Mp) * rad) +
+    0.045758 * Math.sin((2 * D - M_sun_arg) * rad) -
+    0.040923 * Math.sin((M_sun_arg - Mp) * rad) -
+    0.034720 * Math.sin(D * rad) -
+    0.030383 * Math.sin((M_sun_arg + Mp) * rad) +
+    0.015327 * Math.sin((2 * D - 2 * F) * rad);
+
+  const meeusMoonLongDeg = normalizeDeg(Lp + dL);
+
+  // 3. FASE SINÓDICA, ELONGAÇÃO E LONGITUDE ECLÍPTICA NO MUNDO 3D:
+  const meeusElongationDeg = normalizeDeg(meeusMoonLongDeg - meeusSunLongDeg);
+  const synodicPhaseDeg = meeusElongationDeg;
+  const synodicPhaseRad = (synodicPhaseDeg * Math.PI) / 180.0;
+  const moonGeocentricLongitudeDeg = normalizeDeg(sunGeocentricLongitudeDeg + meeusElongationDeg);
+
+  // 4. PRECESSÃO RETRÓGRADA DA LINHA DOS NODOS AO REDOR DO EIXO VERTICAL Y:
+  // Nodo Ascendente (Ω) e Descendente alinhados com o referencial 3D contínuo
+  const ascendingNodeLongitudeDeg = normalizeDeg(sunGeocentricLongitudeDeg + (Omega - meeusSunLongDeg));
   const descendingNodeLongitudeDeg = normalizeDeg(ascendingNodeLongitudeDeg + 180.0);
   const omegaRad = (ascendingNodeLongitudeDeg * Math.PI) / 180.0;
 
-  // 3. FASE SINÓDICA E LONGITUDE ECLÍPTICA DA LUA:
-  // Usamos o Mês Sinódico exato (29.530588853 dias) para a elongação Lua-Sol e o Mês Sideral (27.321661 dias)
-  // para o giro orbital 360° da Lua ao redor da Terra:
-  const synodicProgressDays = ((deltaDays % SYNODIC_MONTH_DAYS) + SYNODIC_MONTH_DAYS) % SYNODIC_MONTH_DAYS;
-  const synodicPhaseRad = (synodicProgressDays / SYNODIC_MONTH_DAYS) * Math.PI * 2;
-  const synodicPhaseDeg = (synodicPhaseRad * 180) / Math.PI;
-  const moonGeocentricLongitudeDeg = normalizeDeg(sunGeocentricLongitudeDeg + synodicPhaseDeg);
-
-  // 4. ARGUMENTO DE LATITUDE DA LUA (u = λ_Lua - Ω):
-  // Distância angular da Lua medida ao longo do plano inclinado a partir do Nodo Ascendente (☊ Verde).
-  // Como Ω regride a -19.34°/ano (-0.053°/dia), a Lua cruza o mesmo nodo a cada 27.2122 dias (Mês Draconítico)!
+  // 5. ARGUMENTO DE LATITUDE DA LUA (u = λ_Lua - Ω):
   const argumentOfLatitudeDeg = normalizeDeg(moonGeocentricLongitudeDeg - ascendingNodeLongitudeDeg);
   const uRad = (argumentOfLatitudeDeg * Math.PI) / 180.0;
 
-  // 5. INCLINAÇÃO ORBITAL FIXA (i = 5.14° real) E ESCALA GEOMÉTRICA 3D PARA CONE DE SOMBRA:
+  // 6. INCLINAÇÃO ORBITAL FIXA (i = 5.14° real) E ESCALA GEOMÉTRICA 3D PARA CONE DE SOMBRA:
   const incRad = (customInclinationDeg * Math.PI) / 180.0;
   const sinBeta = Math.sin(incRad) * Math.sin(uRad);
   const eclipticLatitudeDeg = (Math.asin(THREE.MathUtils.clamp(sinBeta, -1, 1)) * 180) / Math.PI;
 
-  // IMPORTANTE: No espaço real a Lua está a 60.34 R_Terra (onde 5.14° gera 5.41 R_Terra de altura vertical, passando longe da sombra de 1.0 R_Terra).
-  // Como no Globo 3D a órbita visual fica a 6.0 R_Terra para caber na tela, precisamos da razão geométrica (6.25x)
-  // para que a Lua passe nitidamente ACIMA e ABAIXO do cone de sombra da Terra fora dos nodos (eclipsando APENAS nos nodos, 4 a 7 vezes/ano!):
+  // Razão geométrica (6.25x) para o Globo 3D caber na tela com passagem visível acima/abaixo dos cones de sombra:
   const visualTiltRad = Math.atan(Math.tan(incRad) * 6.25);
 
-  // 6. ROTAÇÃO DO PLANO INCLINADO AO REDOR DO EIXO VERTICAL (Y) COM PRECESSÃO NODAL:
-  // Construímos duas rotações explícitas e independentes:
-  //   1) qInclination: inclina o plano orbital em 'visualTiltRad' ao redor da Linha dos Nodos (eixo X local, onde ficam os nodos Verde +X e Rosa -X, mantendo Y=0 nos nodos!).
-  //   2) qNodalPrecessionY: rotaciona o plano inclinado inteiro ao redor do EIXO VERTICAL GLOBAL (Y = (0,1,0)) pelo ângulo 'omegaRad' (-19.34°/ano = -0.053°/dia)!
+  // 7. ROTAÇÃO DO PLANO INCLINADO AO REDOR DO EIXO VERTICAL (Y) COM PRECESSÃO NODAL:
   const qNodalPrecessionY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), omegaRad);
   const qInclination = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -visualTiltRad);
   const orbitPlaneQuaternion = new THREE.Quaternion().multiplyQuaternions(qNodalPrecessionY, qInclination);
@@ -185,10 +211,6 @@ export function calculateLunarOrbitWithNodalPrecession(
   const trueOrbitQuaternion = new THREE.Quaternion().multiplyQuaternions(qNodalPrecessionY, qTrueInclination);
 
   // Posição da Lua no espaço local do plano orbital (antes da inclinação e da precessão nodal):
-  // Em u = 0° -> (+R, 0, 0) = Nodo Ascendente (Verde)
-  // Em u = 90° -> (0, 0, -R) -> Após qInclination vira (0, +R*sin(i), -R*cos(i)) (Ponto mais alto Norte!)
-  // Em u = 180° -> (-R, 0, 0) = Nodo Descendente (Rosa)
-  // Em u = 270° -> (0, 0, +R) -> Após qInclination vira (0, -R*sin(i), +R*cos(i)) (Ponto mais baixo Sul!)
   const localMoonPos = new THREE.Vector3(
     Math.cos(uRad) * moonOrbitRadius,
     0,
@@ -199,22 +221,19 @@ export function calculateLunarOrbitWithNodalPrecession(
   // Posição com ângulo astronômico puro de 5.14° para a Visão Humana:
   const truePosition3D = localMoonPos.clone().applyQuaternion(trueOrbitQuaternion);
 
-  // Direções e posições 3D dos Nodos (sempre no plano horizontal Y = 0, girando a -19.34°/ano ao redor de Y):
+  // Direções e posições 3D dos Nodos (sempre no plano horizontal Y = 0, girando com precessão contínua):
   const ascendingNodeDir = new THREE.Vector3(1, 0, 0).applyQuaternion(qNodalPrecessionY).normalize();
   const descendingNodeDir = ascendingNodeDir.clone().negate();
   const ascendingNodePos3D = ascendingNodeDir.clone().multiplyScalar(moonOrbitRadius);
   const descendingNodePos3D = descendingNodeDir.clone().multiplyScalar(moonOrbitRadius);
 
-  // 8. DETECÇÃO ASTRONÔMICA DE TEMPORADA DE ECLIPSES (4 a 7 eclipses por ano):
-  // Separação angular entre o Sol e o Nodo mais próximo
+  // 8. DETECÇÃO ASTRONÔMICA DE TEMPORADA DE ECLIPSES:
   const sunNodeSeparationDeg = angularDistanceToNodeLineDeg(
     sunGeocentricLongitudeDeg,
     ascendingNodeLongitudeDeg
   );
-  // Janela de temporada de eclipses (~17.0° para cada lado do nodo => ~34.5 dias a cada 173.3 dias)
   const isInEclipseSeason = sunNodeSeparationDeg <= 17.0;
 
-  // Verifica se estamos próximos da Lua Nova (Sizígia Solar) ou Lua Cheia (Sizígia Lunar)
   const distToNewMoonDeg = Math.min(synodicPhaseDeg, 360.0 - synodicPhaseDeg);
   const distToFullMoonDeg = Math.abs(synodicPhaseDeg - 180.0);
   const moonNodeDistDeg = angularDistanceToNodeLineDeg(

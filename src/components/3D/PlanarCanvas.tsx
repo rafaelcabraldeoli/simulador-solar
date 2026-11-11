@@ -91,6 +91,8 @@ export const PlanarCanvas: React.FC = () => {
   const sunMeshRef = useRef<THREE.Group | null>(null);
   const sunSparkleSpriteRef = useRef<THREE.Sprite | null>(null);
   const sunCoronaSpriteRef = useRef<THREE.Sprite | null>(null);
+  const planarCoronaHaloMeshRef = useRef<THREE.Mesh | null>(null);
+  const sunPhotosphereMeshRef = useRef<THREE.Mesh | null>(null);
   const sunPhotosphereMatRef = useRef<THREE.ShaderMaterial | null>(null);
   const sunSpotLightRef = useRef<THREE.SpotLight | null>(null);
   const sunSpotTargetRef = useRef<THREE.Object3D | null>(null);
@@ -370,8 +372,11 @@ export const PlanarCanvas: React.FC = () => {
     scene.add(celestialSphere3D.group);
     celestialSphere3DRef.current = celestialSphere3D;
 
-    // 6. Build Flat Earth Disc with Dynamic Day/Night Shader & 3D Mountain Elevation
-    const nightCitiesTexture = generateNightCityLightsTexture();
+    const nightCitiesTexture = generateNightCityLightsTexture((tex) => {
+      if (earthDiscUniformsRef.current) {
+        earthDiscUniformsRef.current.uNightCitiesTexture.value = tex || nightCitiesTexture;
+      }
+    });
     nightCitiesTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
     let earthTexture: THREE.CanvasTexture;
@@ -876,8 +881,9 @@ export const PlanarCanvas: React.FC = () => {
           // Illuminated nocturnal terrain with moonlight (or pitch-black if moon is absent/below horizon)
           vec3 illuminatedNightTerrain = baseNightTerrain + moonlightDirect;
 
-          // 3. Photorealistic NASA Black Marble city lights in nighttime
-          float nightTerminator = (1.0 - smoothstep(0.0, 0.08, daylight)) * uShowCityLights;
+          // 3. Photorealistic NASA Black Marble city lights in nighttime (strictly on dry continental land!)
+          float dryLandFactor = 1.0 - smoothstep(0.005, 0.035, isWater);
+          float nightTerminator = (1.0 - smoothstep(0.0, 0.08, daylight)) * uShowCityLights * dryLandFactor;
           vec3 activeCityLights = nightCity.rgb * (nightTerminator * 1.35);
 
           // 4. Daytime terrain under real solar sunlight spotlight
@@ -1082,6 +1088,7 @@ export const PlanarCanvas: React.FC = () => {
     const sunMesh = new THREE.Mesh(sunGeo, sunMat);
     sunMesh.renderOrder = 0;
     sunGroup.add(sunMesh);
+    sunPhotosphereMeshRef.current = sunMesh;
     sunPhotosphereMatRef.current = sunMat;
 
     // Halo da Coroa e Cromosfera Solar (Additive Blending para luz pura ao redor do bordo solar)
@@ -1119,6 +1126,7 @@ export const PlanarCanvas: React.FC = () => {
     const planarCoronaHaloMesh = new THREE.Mesh(planarCoronaHaloGeo, planarCoronaHaloMat);
     planarCoronaHaloMesh.renderOrder = 0;
     sunGroup.add(planarCoronaHaloMesh);
+    planarCoronaHaloMeshRef.current = planarCoronaHaloMesh;
 
     // Solar Corona (Coroa Solar) Sprite for Total Solar Eclipse Totality
     const sunCoronaTex = generateSolarCoronaTexture();
@@ -1231,122 +1239,64 @@ export const PlanarCanvas: React.FC = () => {
         varying vec3 vViewNormal;
 
         void main() {
-          // Quando a Lua transita na frente do Sol (Eclipse Solar):
-          // A Lua é o corpo celeste físico que passa diretamente na frente do Sol.
-          if (uIsSolarEclipsing > 0.5) {
-            if (uIsHuman > 0.5) {
-              // No modo de observador humano terrestre:
-              // O observador olha através da atmosfera. Pelo espalhamento Rayleigh diurno,
-              // a face escura da Lua Nova fora do Sol fica transparente/invisível no céu azul ao entrar e ao sair.
-              // Mas qualquer fração da Lua projetada sobre o disco brilhante do Sol bloqueia a luz como silhueta negra nítida.
-              vec3 rayToFrag = normalize(vWorldPosition - cameraPosition);
-              vec3 rayToSun = normalize(uSunWorldPosition - cameraPosition);
-              float cosTheta = dot(rayToFrag, rayToSun);
-
-              // Raio angular dinâmico do Sol na abóbada celeste
-              float minCos = cos(uSunAngularRadius);
-
-              if (cosTheta < minCos) {
-                // Fora do disco solar no céu diurno:
-                if (uDaylightFactor > 0.08) {
-                  discard;
-                }
-              }
-
-              // Sobre o Sol (ou durante totalidade com céu escuro):
-              gl_FragColor = vec4(vec3(0.0, 0.0, 0.0), 1.0);
-              return;
-            } else {
-              // Em visão orbital global (espaço cósmico 3D):
-              // A Lua é uma esfera 3D real posicionada na frente do Sol entre a Terra e o Sol!
-              // Sua face voltada para o Sol recebe luz direta; sua face voltada para a Terra exibe
-              // sombreamento suave, textura lunar e relevo esférico, permitindo ver nitidamente a Lua na frente do Sol.
-              vec4 texColor = texture2D(uMoonTexture, vUv);
-              vec3 sunDir = normalize(uSunWorldPosition - vWorldPosition);
-              vec3 norm = normalize(vWorldNormal);
-              float NdotL = dot(norm, sunDir);
-              float directSunlight = smoothstep(-0.015, 0.035, NdotL);
-              vec3 mineralLitColor = texColor.rgb * vec3(1.10, 1.12, 1.15);
-              vec3 darkSide = texColor.rgb * vec3(0.05, 0.05, 0.06) + vec3(0.020, 0.022, 0.026);
-              vec3 finalColor = mix(darkSide, mineralLitColor, directSunlight);
-              gl_FragColor = vec4(finalColor, 1.0);
-              return;
-            }
-          }
-
           vec4 texColor = texture2D(uMoonTexture, vUv);
 
           // Solar photon incident vector from Moon surface point towards the Sun
           vec3 sunDir = normalize(uSunWorldPosition - vWorldPosition);
           vec3 norm = normalize(vWorldNormal);
-
-          // Lunar surface luminescence and crater maria structure
-          float lum = dot(texColor.rgb, vec3(0.299, 0.587, 0.114));
           vec3 viewDir = normalize(cameraPosition - vWorldPosition);
 
           // Directional solar illumination (Lambertian cosine law for authentic 3D sphere curvature)
           float NdotL = dot(norm, sunDir);
-          
-          // Realistic sharp lunar terminator (Moon lacks atmosphere to scatter light into shadow)
-          float directSunlight = smoothstep(-0.01, 0.04, NdotL);
+          float directSunlight = smoothstep(-0.015, 0.045, NdotL);
           float diffuse = pow(max(0.0, NdotL), 0.85);
 
           // Sunlight color and intensity
           vec3 sunColor = vec3(1.0, 0.985, 0.95);
           float solarIntensity = uSunlightIntensity > 0.1 ? uSunlightIntensity : 1.85;
 
-          // Opposition surge / retroreflective regolith sheen (Hapke effect):
-          // Lunar dust brightens towards the light source with authentic limb radiance
+          // Opposition surge / retroreflective regolith sheen (Hapke effect)
           vec3 halfVec = normalize(sunDir + viewDir);
           float NdotH = clamp(dot(norm, halfVec), 0.0, 1.0);
           float opposition = pow(NdotH, 10.0) * 0.35 * directSunlight;
           float limbSheen = pow(1.0 - clamp(dot(norm, viewDir), 0.0, 1.0), 3.5) * diffuse * 0.30;
-
-          // Lit reflection factor: authentic lunar surface radiance reflecting solar irradiance
           float litReflectance = (diffuse * 1.55 + opposition + limbSheen) * solarIntensity * 0.75;
 
-          // Daytime sky visibility rule:
-          // In broad daylight (human observer looking at the blue sky), the Moon's unlit dark side
-          // reflects NO direct sunlight and is 100% invisible/transparent against Rayleigh atmospheric scattering!
-          // We discard any fragment on the unilluminated hemisphere during the day:
-          if (uIsHuman > 0.5 && uDaylightFactor > 0.08) {
-            if (directSunlight <= 0.005) {
-              discard;
-            }
-          }
-
-          // Enhanced selenographic surface contrast:
-          // Maria (dark basalt lava plains) and Highlands (anorthosite crater rays) pop realistically:
+          // Enhanced selenographic surface contrast: Maria (dark plains) and Highlands (crater rays)
+          float lum = dot(texColor.rgb, vec3(0.299, 0.587, 0.114));
           float mareContrast = smoothstep(0.15, 0.82, lum);
           vec3 enhancedTexture = mix(texColor.rgb * 0.82, texColor.rgb * 1.18, mareContrast);
 
           // Nighttime lit surface: brilliant silvery-white reflected sunlight
           vec3 nightLitColor = enhancedTexture * sunColor * litReflectance;
 
-          // Daytime lit surface (Human view through blue atmosphere):
-          // In broad daylight, the Moon's real surface features (mares, craters) remain visible,
-          // overlaid with the blue atmospheric sky haze:
+          // Daytime lit surface (Human view through atmosphere):
           vec3 blueSkyTint = vec3(0.50, 0.70, 0.94);
           vec3 daytimeAlbedo = enhancedTexture * vec3(1.05, 1.02, 0.98) * (diffuse * 1.35 + 0.12);
           vec3 dayLitColor = mix(daytimeAlbedo, blueSkyTint, 0.28 * uDaylightFactor);
           vec3 mineralLitColor = mix(nightLitColor, dayLitColor, clamp(uDaylightFactor * uIsHuman, 0.0, 1.0));
 
-          // Shaded hemisphere (Earthshine sutilíssima no espaço / noite; transparente de dia)
-          float dayFactor = clamp(uDaylightFactor * uIsHuman, 0.0, 1.0);
-          vec3 earthshineNight = enhancedTexture * vec3(0.015, 0.018, 0.024);
-          vec3 effectiveDarkSide = mix(earthshineNight, vec3(0.0), dayFactor);
+          // Shaded hemisphere (Earthshine / luz cinérea refletida pela Terra que revela as crateras no lado escuro):
+          vec3 earthshineNight = enhancedTexture * vec3(0.055, 0.058, 0.065) + vec3(0.015, 0.016, 0.020);
+          vec3 effectiveDarkSide = earthshineNight;
 
-          // Renderização da fase lunar autêntica
+          // Renderização base da Lua
           vec3 finalColor = mix(effectiveDarkSide, mineralLitColor, directSunlight);
 
-          // Opacity handling: no espaço ou à noite é 100% opaco (alpha = 1.0)
-          // No céu diurno humano, o lado escuro não iluminado é 100% transparente para mostrar o céu azul
+          // Opacity handling:
           float alpha = 1.0;
-          if (uIsHuman > 0.5 && uDaylightFactor > 0.05) {
+          if (uIsSolarEclipsing > 0.5) {
+            // Durante o Eclipse Solar: A Lua transita na frente do Sol como corpo físico esférico real!
+            // Sua silhueta escura é opaca (alpha = 1.0), mas preserva nitidamente o relevo e textura das crateras e mares:
+            vec3 eclipseRegolith = enhancedTexture * vec3(0.08, 0.082, 0.09) + vec3(0.012, 0.012, 0.016);
+            finalColor = mix(finalColor, eclipseRegolith, 0.85);
+            alpha = 1.0;
+          } else if (uIsHuman > 0.5 && uDaylightFactor > 0.08) {
+            // Em céu diurno comum fora de eclipse: o lado iluminado é visível; o lado escuro fica transparente contra o azul do céu
             alpha = smoothstep(0.0, 0.04, NdotL) * mix(1.0, 0.92, uDaylightFactor);
-          }
-          if (alpha < 0.005) {
-            discard;
+            if (alpha < 0.005) {
+              discard;
+            }
           }
 
           // PROGRESSIVE LUNAR ECLIPSE / BLOOD MOON OCCULTATION:
@@ -2543,25 +2493,89 @@ export const PlanarCanvas: React.FC = () => {
       );
 
       // Trânsito orbital contínuo e suave da Lua na frente do Sol durante eclipses solares:
+      // Trânsito orbital contínuo e suave da Lua na frente do Sol durante eclipses solares:
       const catalogMatch = findMatchingCatalogEclipse(store.currentDate);
       let isCatalogSolarEclipseTransit = false;
       let transitProgress = 0;
       let eclipseBlend = 0;
 
+      const moonSky = {
+        ...normalMoonSky,
+        position: { ...normalMoonSky.position },
+      };
+
       if (store.settings.eclipseTheory === 'moon_eclipses_sun' && catalogMatch && catalogMatch.type === 'solar') {
         const diffHours = (store.currentDate.getTime() - catalogMatch.date.getTime()) / (1000 * 3600);
         const absDiff = Math.abs(diffHours);
-        if (absDiff <= 2.5) {
+
+        // Distância do observador até a linha central do eclipse
+        const obsLat = store.settings.observerLat;
+        const obsLng = store.settings.observerLng;
+        const dLatRad = ((obsLat - catalogMatch.lat) * Math.PI) / 180;
+        const dLngRad = ((obsLng - catalogMatch.lng) * Math.PI) / 180;
+        const lat1Rad = (catalogMatch.lat * Math.PI) / 180;
+        const lat2Rad = (obsLat * Math.PI) / 180;
+        const haversineA =
+          Math.sin(dLatRad / 2) * Math.sin(dLatRad / 2) +
+          Math.cos(lat1Rad) * Math.cos(lat2Rad) * Math.sin(dLngRad / 2) * Math.sin(dLngRad / 2);
+        const haversineC = 2 * Math.atan2(Math.sqrt(haversineA), Math.sqrt(Math.max(0, 1 - haversineA)));
+        const observerDistKm = 6371 * haversineC;
+
+        // Janela de visibilidade do eclipse: até ±2.5 horas do pico e até 3800 km da rota
+        if (absDiff <= 2.5 && observerDistKm <= 3800) {
           isCatalogSolarEclipseTransit = true;
-          transitProgress = diffHours / 1.25; // -2.0 a +2.0 ao longo de ±2.5 horas
-          eclipseBlend = Math.cos((absDiff / 2.5) * (Math.PI / 2)) ** 2;
+          // -1.0 em -1.1h (1º contato / entrada), 0 em 0h (totalidade), +1.0 em +1.1h (4º contato / saída)
+          transitProgress = diffHours / 1.1;
+
+          // Vetor unitário apontando para o Sol na abóbada celeste
+          const dirSun = new THREE.Vector3(
+            sunSky.position.x,
+            sunSky.position.y,
+            sunSky.position.z
+          ).normalize();
+
+          // Base de coordenadas perpendicular ao raio solar no céu (Eixo Leste-Oeste e Zenith-Nadir)
+          const compass = getLocalCompassVectors(obsGround);
+          const localEastVec = new THREE.Vector3(compass.ex, 0, compass.ez);
+          const transitAxisX = new THREE.Vector3()
+            .copy(localEastVec)
+            .addScaledVector(dirSun, -localEastVec.dot(dirSun))
+            .normalize();
+          const transitAxisY = new THREE.Vector3().crossVectors(transitAxisX, dirSun).normalize();
+
+          // Deslocamento de trânsito em unidades 3D:
+          // Diâmetro do Sol = 2 * 0.52 = 1.04.
+          // Em ±1.1h (primeiro/último contato), a Lua está a ±1.08 unidades (tangenciando o disco solar).
+          const sunAngularRadiusUnits = 0.52;
+          const transitOffsetX = transitProgress * (sunAngularRadiusUnits * 2.1);
+          // Deslocamento vertical dependente da distância até a linha de totalidade:
+          const impactOffsetY = (observerDistKm / 2400) * (sunAngularRadiusUnits * 1.7);
+
+          // Posição 3D da Lua a distância 39.75 (em frente ao Sol que fica a 40.0)
+          const transitMoonPos = dirSun.clone().multiplyScalar(39.75)
+            .addScaledVector(transitAxisX, -transitOffsetX)
+            .addScaledVector(transitAxisY, impactOffsetY);
+
+          // Suavização Gaussiana contínua C^infinito para transição estritamente contínua sem saltos
+          const timeSigma = 1.35; // horas
+          const distSigma = 1800; // km
+          const timeWeight = Math.exp(-0.5 * Math.pow(diffHours / timeSigma, 2));
+          const distWeight = Math.exp(-0.5 * Math.pow(observerDistKm / distSigma, 2));
+          eclipseBlend = timeWeight * distWeight;
+
+          if (eclipseBlend > 0.0001) {
+            moonSky.position.x = THREE.MathUtils.lerp(normalMoonSky.position.x, transitMoonPos.x, eclipseBlend);
+            moonSky.position.y = THREE.MathUtils.lerp(normalMoonSky.position.y, transitMoonPos.y, eclipseBlend);
+            moonSky.position.z = THREE.MathUtils.lerp(normalMoonSky.position.z, transitMoonPos.z, eclipseBlend);
+
+            const distFromObs = Math.hypot(moonSky.position.x, moonSky.position.z);
+            moonSky.altitudeDeg = (Math.atan2(moonSky.position.y, distFromObs) * 180) / Math.PI;
+            moonSky.isAboveHorizon = moonSky.altitudeDeg > -0.85;
+          }
         }
       }
 
       const isMoonEclipsingSun = (store.settings.eclipseTheory === 'moon_eclipses_sun') && (eclipseInfo.isSolarEclipseActive || isCatalogSolarEclipseTransit);
-
-      // Posição contínua da Lua no circuito celeste natural (sem saltos artificiais fora da trajetória):
-      const moonSky = normalMoonSky;
 
       // Sun Light On/Off status (Apagar Luz do Sol)
       const isSunLit = store.settings.sunLightEnabled !== false;
@@ -2584,33 +2598,37 @@ export const PlanarCanvas: React.FC = () => {
           sunMeshRef.current.position.set(sunSky.position.x, sunSky.position.y, sunSky.position.z);
           sunMeshRef.current.scale.set(1.0, 1.0, 1.0);
           const isSunVisibleInHuman = sunSky.isAboveHorizon && sunSky.altitudeDeg >= -0.85;
-          // Na totalidade de eclipse solar (> 0.94), oculta a fotosfera brilhante amarela para que apenas a Coroa resplandeça
-          const isPhotosphereHiddenByTotality = eclipseInfo.isSolarEclipseActive && eclipseInfo.solarEclipseMagnitude > 0.94;
-          sunMeshRef.current.visible = isSunVisibleInHuman && isSunLit && !isPhotosphereHiddenByTotality;
+          sunMeshRef.current.visible = isSunVisibleInHuman && isSunLit;
+
+          if (sunPhotosphereMeshRef.current) {
+            const isPhotosphereHiddenByTotality = (eclipseInfo.isSolarEclipseActive || isCatalogSolarEclipseTransit) && eclipseInfo.solarEclipseMagnitude > 0.94;
+            sunPhotosphereMeshRef.current.visible = isSunVisibleInHuman && isSunLit && !isPhotosphereHiddenByTotality;
+          }
         } else {
           sunMeshRef.current.position.set(sunState.x, sunState.y, sunState.z);
           sunMeshRef.current.scale.set(1.0, 1.0, 1.0);
           sunMeshRef.current.visible = true;
+          if (sunPhotosphereMeshRef.current) {
+            sunPhotosphereMeshRef.current.visible = true;
+          }
         }
       }
 
       // 1C. Solar Corona (Coroa Solar) for Total Solar Eclipse
       // Durante o eclipse total por Rahu ou pela Lua, a Coroa Solar resplandece ao redor do disco escurecido na totalidade
       if (sunCoronaSpriteRef.current) {
-        if (eclipseInfo.isSolarEclipseActive && eclipseInfo.solarEclipseMagnitude > 0.45) {
-          const mag = eclipseInfo.solarEclipseMagnitude;
-          if (eclipseInfo.eclipsingBody === 'rahu' || (eclipseInfo.eclipsingBody === 'moon' && (eclipseInfo.eclipseType === 'solar_total' || mag > 0.85))) {
-            const coronaAlpha = THREE.MathUtils.clamp((mag - 0.50) / 0.45, 0.0, 1.0);
-            const shimmer = 1.0;
-            sunCoronaSpriteRef.current.material.opacity = coronaAlpha * shimmer * 0.96;
-            const coronaScale = isHuman ? 1.25 : 3.2;
-            sunCoronaSpriteRef.current.scale.set(coronaScale, coronaScale, 1);
-            sunCoronaSpriteRef.current.visible = coronaAlpha > 0.01;
-          } else {
-            // Ketu / Anular: brilho suave ofuscado pelo anel de fogo
-            sunCoronaSpriteRef.current.material.opacity = 0.14;
-            sunCoronaSpriteRef.current.visible = true;
-          }
+        const effMag = Math.max(
+          eclipseInfo.solarEclipseMagnitude,
+          isCatalogSolarEclipseTransit ? Math.max(0, 1.0 - Math.abs(transitProgress)) : 0
+        );
+        if (effMag > 0.45) {
+          const coronaAlpha = THREE.MathUtils.clamp((effMag - 0.50) / 0.45, 0.0, 1.0);
+          sunCoronaSpriteRef.current.material.color.setHex(0xffffff);
+          sunCoronaSpriteRef.current.material.opacity = coronaAlpha * 0.96;
+          // Escala 3.35 calibrada exatamente para a fotosfera solar (raio 0.52) e disco lunar (raio 0.537)
+          const coronaScale = isHuman ? 3.35 : 3.2;
+          sunCoronaSpriteRef.current.scale.set(coronaScale, coronaScale, 1);
+          sunCoronaSpriteRef.current.visible = coronaAlpha > 0.01;
         } else if (isHuman && sunSky.altitudeDeg < 14.0 && sunSky.altitudeDeg >= 0.0 && isSunLit) {
           // Pôr do Sol: Halo e coroa solar poente compacta (tamanho constante proporcional à Lua)
           const sunAlt = sunSky.altitudeDeg;
@@ -2625,6 +2643,10 @@ export const PlanarCanvas: React.FC = () => {
           sunCoronaSpriteRef.current.material.opacity = 0.0;
           sunCoronaSpriteRef.current.visible = false;
         }
+      }
+
+      if (planarCoronaHaloMeshRef.current) {
+        planarCoronaHaloMeshRef.current.visible = !eclipseInfo.isSolarEclipseActive && !isCatalogSolarEclipseTransit;
       }
 
       // Animate Sun Sparkle Glint / Feixe Solar (Luz estável sem pulsação)
@@ -3191,8 +3213,9 @@ export const PlanarCanvas: React.FC = () => {
 
       // C4. Update Sun Photosphere Eclipse Occultation (Progressivo: Sol se tornando meio sol até fechar por completo)
       if (sunPhotosphereMatRef.current) {
-        const mat = sunPhotosphereMatRef.current;
-        if (eclipseInfo.isSolarEclipseActive) {
+        // Para a teoria 'moon_eclipses_sun', a própria Lua 3D física em órbita passa na frente do Sol.
+        // Ocultador 2D do shader solar só deve agir caso a teoria ativa seja 'rahu_ketu':
+        if (store.settings.eclipseTheory !== 'moon_eclipses_sun' && eclipseInfo.isSolarEclipseActive) {
           const isKetu = eclipseInfo.eclipsingBody === 'ketu';
           const isMoon = eclipseInfo.eclipsingBody === 'moon';
           const eclipsingMesh = isKetu ? ketuMeshRef.current : (isMoon ? moonMeshRef.current : rahuMeshRef.current);
@@ -3500,7 +3523,8 @@ export const PlanarCanvas: React.FC = () => {
               store.layers.constellationLineColor || 'cyan',
               store.layers.constellationLineOpacity ?? 0.85,
               store.layers.selectedConstellation,
-              false
+              false,
+              eclipseInfo.isSolarEclipseActive ? eclipseInfo.solarEclipseMagnitude : (isCatalogSolarEclipseTransit ? Math.max(0, 1.0 - Math.abs(transitProgress)) : 0.0)
             );
           } else {
             celestialSphere3DRef.current.update(
@@ -3919,53 +3943,41 @@ export const PlanarCanvas: React.FC = () => {
       const store = useSimulationStore.getState();
       const positions = calculateAstroPositions(store.currentDate, store.settings);
       const obsGround = geoToPlanarCoords(store.settings.observerLat, store.settings.observerLng);
-      const horizonGeo = getDynamicHorizonDistance(store.settings.observerLat, store.settings.observerLng, store.currentDate);
+      const compass = getLocalCompassVectors(obsGround);
+      const eyeY = humanEyeHeightRef.current || 0.05;
 
-      const targetPos = positions[targetId] || positions.sun;
-      let maxCulm = 65.0;
-      let haRad = horizonGeo.haRad;
-      let isSun = false;
-      let nodalFac = 0;
+      let targetX = 0;
+      let targetY = 0;
+      let targetZ = 0;
 
-      const eclipseInfo = getEclipseInfo(
-        positions.sun,
-        positions.moon,
-        positions.rahu,
-        positions.ketu,
-        store.settings.eclipseTheory,
-        store.currentDate,
-        store.settings.observerLat,
-        store.settings.observerLng
-      );
-      const isMoonEclipsing = (targetId === 'moon') && (store.settings.eclipseTheory === 'moon_eclipses_sun') && eclipseInfo.isSolarEclipseActive;
-
-      if (targetId === 'sun' || targetId === 'rahu' || isMoonEclipsing) {
-        maxCulm = horizonGeo.maxCulminationDeg;
-        haRad = horizonGeo.haRad;
-        isSun = true;
-      } else if (targetId === 'moon' || targetId === 'ketu') {
-        const totalDaysEpoch = (store.currentDate.getTime() / (1000 * 60 * 60 * 24));
-        nodalFac = Math.sin((totalDaysEpoch / 27.32) * 2 * Math.PI);
-        maxCulm = Math.max(15.0, Math.min(90.0, 90.0 - Math.abs(store.settings.observerLat - (23.44 * nodalFac))));
-        haRad = Math.PI / 2;
-        isSun = false;
+      if (targetId === 'sun' && sunMeshRef.current) {
+        targetX = sunMeshRef.current.position.x;
+        targetY = sunMeshRef.current.position.y;
+        targetZ = sunMeshRef.current.position.z;
+      } else if (targetId === 'moon' && moonMeshRef.current) {
+        targetX = moonMeshRef.current.position.x;
+        targetY = moonMeshRef.current.position.y;
+        targetZ = moonMeshRef.current.position.z;
+      } else {
+        const horizonGeo = getDynamicHorizonDistance(store.settings.observerLat, store.settings.observerLng, store.currentDate);
+        const targetPos = positions[targetId] || positions.sun;
+        const targetSky = calculateApparentCelestialSkyVector(
+          targetPos,
+          obsGround,
+          39.2,
+          horizonGeo.horizonDist,
+          65.0,
+          horizonGeo.haRad,
+          false
+        );
+        targetX = targetSky.position.x;
+        targetY = targetSky.position.y;
+        targetZ = targetSky.position.z;
       }
 
-      const targetSky = calculateApparentCelestialSkyVector(
-        targetPos,
-        obsGround,
-        39.2,
-        horizonGeo.horizonDist,
-        maxCulm,
-        haRad,
-        isSun,
-        nodalFac
-      );
-
-      const compass = getLocalCompassVectors(obsGround);
-      const dx = targetSky.position.x - obsGround.x;
-      const dy = targetSky.position.y - 0.05;
-      const dz = targetSky.position.z - obsGround.z;
+      const dx = targetX - obsGround.x;
+      const dy = targetY - eyeY;
+      const dz = targetZ - obsGround.z;
 
       const localNorth = dx * compass.nx + dz * compass.nz;
       const localEast = dx * compass.ex + dz * compass.ez;
@@ -3973,11 +3985,10 @@ export const PlanarCanvas: React.FC = () => {
       if (azRad < 0) azRad += 2 * Math.PI;
 
       const horizDist = Math.hypot(localNorth, localEast);
-      const pitchRad = Math.atan2(dy, horizDist);
+      const pitchRad = Math.atan2(dy, Math.max(0.001, horizDist));
 
       humanLookAnglesRef.current.azimuth = azRad;
-      // Always look up towards the celestial vault when focusing on an astro
-      humanLookAnglesRef.current.pitch = clampHumanPitch(Math.max(0.08, pitchRad));
+      humanLookAnglesRef.current.pitch = clampHumanPitch(pitchRad);
       broadcastHumanCameraAngles(humanLookAnglesRef.current.azimuth, humanLookAnglesRef.current.pitch);
     };
 

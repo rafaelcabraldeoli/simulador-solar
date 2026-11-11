@@ -152,13 +152,11 @@ export const HumanObserverHUD: React.FC<HumanObserverHUDProps> = ({ isGlobeMode 
     const tiltDeg = globeConfig?.axialTiltDeg ?? 23.44;
     const tiltRad = (tiltDeg * Math.PI) / 180;
     const decRad = Math.asin(Math.sin(tiltRad) * Math.cos(((dayOfYr - 172) / 365.25) * Math.PI * 2));
-    const obsUtcOffsetHrs = getLocationUtcOffsetHours(settings.observerLat, settings.observerLng);
-    const localClockHrs =
-      currentDate.getHours() +
-      currentDate.getMinutes() / 60 +
-      currentDate.getSeconds() / 3600 +
-      currentDate.getMilliseconds() / 3600000;
-    const utcHrs = ((localClockHrs - obsUtcOffsetHrs) % 24 + 24) % 24;
+    const utcHrs =
+      currentDate.getUTCHours() +
+      currentDate.getUTCMinutes() / 60 +
+      currentDate.getUTCSeconds() / 3600 +
+      currentDate.getUTCMilliseconds() / 3600000;
     const subsolarLngDeg = (12.0 - utcHrs) * 15.0;
     const haRad = ((settings.observerLng - subsolarLngDeg) * Math.PI) / 180;
     const latRad = (settings.observerLat * Math.PI) / 180;

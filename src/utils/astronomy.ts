@@ -2,6 +2,7 @@ import { AstroCalculatedState, AstroId, ModelSettings } from '../types';
 import { CELESTIAL_BODIES } from '../data/celestialBodies';
 import { WorldCity, findNearestCity } from '../data/cities';
 import { findMatchingCatalogEclipse } from '../data/eclipses';
+import { calculateLunarOrbitWithNodalPrecession, getContinuousEarthOrbitAngleRad } from './lunarNodalPrecession';
 export { findMatchingCatalogEclipse };
 
 /**
@@ -395,17 +396,37 @@ export function calculateAstroPositions(
   const sunX = sunRadius * Math.cos(sunAngleRad);
   const sunZ = sunRadius * Math.sin(sunAngleRad); // Clockwise circuit: (x = cos, z = sin)
 
-  // 2. MOON CALCULATIONS (Clockwise with ~50 min daily lag)
+  // 2. MOON CALCULATIONS (Unified Meeus + Nodal Precession 5.14° with 18.6-year cycle)
   const totalDaysEpoch = (date.getTime() / (1000 * 60 * 60 * 24));
-  
-  // Calibrated synodic month using known New Moon reference epoch (Jan 11 2024 11:57 UTC)
-  const KNOWN_NEW_MOON_EPOCH = 19733.498;
-  const synodicCycle = 29.530588;
-  const daysSinceNewMoon = totalDaysEpoch - KNOWN_NEW_MOON_EPOCH;
-  const synodicFraction = (((daysSinceNewMoon % synodicCycle) + synodicCycle) % synodicCycle) / synodicCycle;
+  const earthOrbitAngleRad = getContinuousEarthOrbitAngleRad(date);
+  const lunarTelemetry = calculateLunarOrbitWithNodalPrecession(date, earthOrbitAngleRad, 18.0, 5.145);
 
-  let moonAngleDeg = (sunAngleDeg - synodicFraction * 360) % 360;
-  if (moonAngleDeg < 0) moonAngleDeg += 360;
+  // Exact Meeus elongation (distância angular Lua-Sol): 0° na Lua Nova, 180° na Lua Cheia
+  const elongationDeg = (lunarTelemetry.synodicPhaseRad * 180) / Math.PI;
+  // A Lua percorre o circuito diário no mesmo sentido horário do Sol, atrasando ~50 min/dia conforme a elongação real:
+  let moonAngleDeg = ((sunAngleDeg - elongationDeg) % 360 + 360) % 360;
+
+  // Argumento de latitude u = λ_Lua - Ω (ciclo draconítico de 27,21 dias pelos Nodos ☊ e ☋):
+  const uRad = (lunarTelemetry.argumentOfLatitudeDeg * Math.PI) / 180;
+  const sinU = Math.sin(uRad);
+  const moonNodalFactor = sinU;
+
+  // Oscilação Radial Nodal: nos Nodos (u = 0° ou 180°), sin(u) = 0 e o raio da Lua coincide perfeitamente com o do Sol!
+  // Fora dos nodos, o raio da Lua oscila suavemente para o Norte (+2.4) ou Sul (-2.4):
+  const nodalRadiusOffset = 2.4 * sinU;
+  let moonRadius = sunRadius + nodalRadiusOffset;
+
+  // Oscilação Vertical Nodal (Altitude Y):
+  // Altura base de trânsito em frente ao Sol: ~8.46 unidades (estritamente abaixo do Sol de ~9.0, entre a Terra e o Sol).
+  // A inclinação nodal de 5.14° faz a Lua ficar por um período ACIMA DO SOL (sin(u) > 0) e por um período ABAIXO DO SOL (sin(u) < 0).
+  // No cruzamento dos Nodos (sin(u) = 0), a Lua desce exatamente ao nível de trânsito em frente ao Sol!
+  const baseMoonY = baseSunY * 0.94;
+  const nodalAltitudeDelta = 1.35 * sinU;
+  let moonY = baseMoonY + 0.25 * seasonalFactor + 0.15 * Math.cos(diurnalHourAngle) + nodalAltitudeDelta;
+
+  let moonAngleRad = (moonAngleDeg * Math.PI) / 180;
+  let moonX = moonRadius * Math.cos(moonAngleRad);
+  let moonZ = moonRadius * Math.sin(moonAngleRad); // Sentido horário contínuo
 
   // Check if date matches a catalog eclipse (active window ±3.5 hours)
   const catalogMatch = findMatchingCatalogEclipse(date);
@@ -418,34 +439,21 @@ export function calculateAstroPositions(
     if (absDiff <= 3.5) {
       if (catalogMatch.type === 'lunar') {
         isCatalogLunarEclipse = true;
+      } else if (catalogMatch.type === 'solar') {
+        isCatalogSolarEclipse = true;
       }
     }
   }
-  
-  const moonNodalFactor = Math.sin((totalDaysEpoch / 27.32) * 2 * Math.PI);
-  let moonRadius = 18.0 - 4.5 * moonNodalFactor;
-  
-  // The Moon is consistently positioned at its true celestial altitude just below the Sun (between Earth and Sun)
-  // Base altitude: ~8.46 units (corresponding to ~4700 km vs Sun at 5000 km)
-  const baseMoonY = baseSunY * 0.94;
-  let moonY = baseMoonY + 0.25 * seasonalFactor + 0.15 * Math.cos(diurnalHourAngle);
 
-  let moonAngleRad = (moonAngleDeg * Math.PI) / 180;
-  let moonX = moonRadius * Math.cos(moonAngleRad);
-  let moonZ = moonRadius * Math.sin(moonAngleRad); // Clockwise
-
-  // Moon Phase calculation (angle difference between Sun and Moon)
-  let phaseAngle = ((sunAngleDeg - moonAngleDeg) * Math.PI) / 180;
-  phaseAngle = ((phaseAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-
-  // Phase name & illumination percentage
-  let illuminatedPct = Math.round(((1 - Math.cos(phaseAngle)) / 2) * 1000) / 10;
+  // Moon Phase & Illumination calculated from true Meeus synodic phase:
+  const phaseAngle = lunarTelemetry.synodicPhaseRad;
+  let illuminatedPct = Math.round(lunarTelemetry.illuminatedFraction * 1000) / 10;
   let phaseName = 'Lua Nova';
-  
+
   if (isCatalogLunarEclipse) {
     illuminatedPct = 100;
     phaseName = 'Lua Cheia • Lua de Sangue (Eclipse Total)';
-  } else if (isCatalogSolarEclipse) {
+  } else if (isCatalogSolarEclipse || lunarTelemetry.activeEclipseType === 'solar_total_or_annular' || lunarTelemetry.activeEclipseType === 'solar_partial') {
     illuminatedPct = 0;
     phaseName = 'Lua Nova (Eclipse Solar)';
   } else if (phaseAngle < 0.25 * Math.PI) phaseName = 'Crescente Côncava';
@@ -740,14 +748,40 @@ export function getEclipseInfo(
       const diffHours = (date!.getTime() - catalogMatch.date.getTime()) / (1000 * 3600);
       const absDiff = Math.abs(diffHours);
       if (absDiff <= 1.25) {
-        isSolarEclipseActive = true;
-        eclipsingBody = 'moon';
-        // Janela de totalidade máxima (ex.: ~6.4 minutos / ±0.053 horas em Luxor, Egito):
-        const totalityRadiusHours = 0.053;
-        if (absDiff <= totalityRadiusHours) {
-          solarEclipseMagnitude = 1.0;
-        } else {
-          solarEclipseMagnitude = Math.max(0, 1.0 - (absDiff - totalityRadiusHours) / (1.25 - totalityRadiusHours));
+        let isObserverInPath = true;
+        let pathFactor = 1.0;
+
+        if (observerLat !== undefined && observerLng !== undefined) {
+          const dLatRad = ((observerLat - catalogMatch.lat) * Math.PI) / 180;
+          const dLngRad = ((observerLng - catalogMatch.lng) * Math.PI) / 180;
+          const lat1Rad = (catalogMatch.lat * Math.PI) / 180;
+          const lat2Rad = (observerLat * Math.PI) / 180;
+          const haversineA =
+            Math.sin(dLatRad / 2) * Math.sin(dLatRad / 2) +
+            Math.cos(lat1Rad) * Math.cos(lat2Rad) * Math.sin(dLngRad / 2) * Math.sin(dLngRad / 2);
+          const haversineC = 2 * Math.atan2(Math.sqrt(haversineA), Math.sqrt(Math.max(0, 1 - haversineA)));
+          const observerDistKm = 6371 * haversineC;
+
+          if (observerDistKm > 3600) {
+            isObserverInPath = false;
+          } else {
+            pathFactor = Math.max(0, 1.0 - observerDistKm / 3600);
+          }
+        }
+
+        if (isObserverInPath) {
+          isSolarEclipseActive = true;
+          eclipsingBody = 'moon';
+          const totalityRadiusHours = 0.053;
+          let timeMag = 0.0;
+          if (absDiff <= totalityRadiusHours) {
+            timeMag = 1.0;
+          } else {
+            timeMag = Math.max(0, 1.0 - (absDiff - totalityRadiusHours) / (1.25 - totalityRadiusHours));
+          }
+          solarEclipseMagnitude = timeMag * pathFactor;
+          isSolarEclipseActive = solarEclipseMagnitude > 0.03;
+          eclipseType = catalogMatch.subtype === 'Total / Anular' ? 'solar_total' : 'solar_partial';
         }
       }
     }

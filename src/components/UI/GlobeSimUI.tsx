@@ -29,6 +29,7 @@ import {
   getContinuousEarthOrbitAngleRad,
   NODAL_PRECESSION_RATE_DEG_PER_YEAR,
 } from '../../utils/lunarNodalPrecession';
+import { ECLIPSE_CATALOG, findMatchingCatalogEclipse } from '../../data/eclipses';
 
 interface GlobeSimUIProps {
   globeConfig: GlobeViewConfig;
@@ -116,6 +117,69 @@ export const GlobeSimUI: React.FC<GlobeSimUIProps> = ({ globeConfig, setGlobeCon
 
   const selectedPlanetSpec = SOLAR_SYSTEM_PLANETS.find((p) => p.id === globeConfig.focusedBody);
 
+  const handleSelectEclipse = (
+    ec: { date: Date; type: 'solar' | 'lunar'; subtype: string },
+    targetPreset: 'human_surface' | 'orbit' = 'human_surface'
+  ) => {
+    const matchCat =
+      ECLIPSE_CATALOG.find((cat) => Math.abs(cat.date.getTime() - ec.date.getTime()) < 3600000 * 24) ||
+      findMatchingCatalogEclipse(ec.date);
+
+    // 1. Pause simulation so time does not immediately advance past totality
+    useSimulationStore.setState({ isPlaying: false });
+
+    // 2. Set exact simulation date
+    const targetDate = matchCat ? new Date(matchCat.date.getTime()) : new Date(ec.date.getTime());
+    useSimulationStore.getState().setDate(targetDate);
+
+    // 3. Teleport observer to exact totality coordinates
+    if (matchCat) {
+      useSimulationStore.getState().updateSettings({
+        observerLat: matchCat.lat,
+        observerLng: matchCat.lng,
+        observerLocationName: matchCat.locationName,
+        observerBiome: matchCat.biome || 'mountain',
+      });
+    } else {
+      // Dynamic fallback for any computed eclipse: compute subsolar lat/lng
+      const dayOfYear = getDayOfYear(ec.date);
+      const seasonalAngle = ((dayOfYear - 172) / 365.25) * Math.PI * 2;
+      const decDeg = (Math.asin(Math.sin((23.44 * Math.PI) / 180) * Math.cos(seasonalAngle)) * 180) / Math.PI;
+      const utcHours = ec.date.getUTCHours() + ec.date.getUTCMinutes() / 60;
+      let subsolarLng = (12.0 - utcHours) * 15.0;
+      if (subsolarLng > 180) subsolarLng -= 360;
+      if (subsolarLng < -180) subsolarLng += 360;
+
+      useSimulationStore.getState().updateSettings({
+        observerLat: decDeg,
+        observerLng: subsolarLng,
+        observerLocationName: `${ec.type === 'solar' ? 'Ponto Central do Eclipse Solar' : 'Observatório Lunar'}`,
+        observerBiome: 'mountain',
+      });
+    }
+
+    // 4. Update camera preset
+    if (targetPreset === 'human_surface') {
+      setGlobeConfig((prev) => ({
+        ...prev,
+        globeCameraPreset: 'human_surface',
+      }));
+      const targetAstro = ec.type === 'solar' ? 'sun' : 'moon';
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('globe-human-look-at-astro', { detail: { astroId: targetAstro } }));
+      }, 120);
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('globe-human-look-at-astro', { detail: { astroId: targetAstro } }));
+      }, 450);
+    } else {
+      setGlobeConfig((prev) => ({
+        ...prev,
+        focusedBody: ec.type === 'solar' ? 'earth' : 'moon',
+        globeCameraPreset: 'orbit',
+      }));
+    }
+  };
+
   return (
     <>
       {/* 1. Top Toolbar with Theory Mode Switcher & Globe Camera Presets */}
@@ -181,12 +245,23 @@ export const GlobeSimUI: React.FC<GlobeSimUIProps> = ({ globeConfig, setGlobeCon
                       ? 'Construindo horizonte tangente esférico e bioma em 1ª pessoa...'
                       : 'Reposicionando câmera astronômica e órbitas heliocêntricas...',
                     preset.id === 'human_surface' || globeConfig.globeCameraPreset === 'human_surface' ? 1100 : 800,
-                    () =>
+                    () => {
                       setGlobeConfig((prev) => ({
                         ...prev,
                         globeCameraPreset: preset.id,
                         focusedBody: preset.id === 'solar_system' ? 'solar_system' : 'earth',
-                      }))
+                      }));
+                      if (preset.id === 'human_surface') {
+                        const activeEc = findMatchingCatalogEclipse(currentDate);
+                        const targetAstro = activeEc?.type === 'solar' ? 'sun' : activeEc?.type === 'lunar' ? 'moon' : 'sun';
+                        setTimeout(() => {
+                          window.dispatchEvent(new CustomEvent('globe-human-look-at-astro', { detail: { astroId: targetAstro } }));
+                        }, 120);
+                        setTimeout(() => {
+                          window.dispatchEvent(new CustomEvent('globe-human-look-at-astro', { detail: { astroId: targetAstro } }));
+                        }, 400);
+                      }
+                    }
                   );
                 }}
                 title={preset.label}
@@ -570,29 +645,52 @@ export const GlobeSimUI: React.FC<GlobeSimUIProps> = ({ globeConfig, setGlobeCon
                       {annualEclipses.length} eclipses
                     </span>
                   </div>
-                  <div className="max-h-28 overflow-y-auto space-y-1 pr-0.5 scrollbar-thin">
-                    {annualEclipses.map((ec, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => {
-                          useSimulationStore.getState().setDate(ec.date);
-                          setGlobeConfig((prev) => ({
-                            ...prev,
-                            focusedBody: ec.type === 'solar' ? 'earth' : 'moon',
-                            globeCameraPreset: 'orbit',
-                          }));
-                        }}
-                        className="w-full flex items-center justify-between px-1.5 py-1 rounded bg-slate-900 hover:bg-indigo-950/80 border border-slate-800 hover:border-indigo-500/50 text-left transition"
-                        title="Clique para saltar para a data exata deste eclipse gerado pela precessão nodal"
-                      >
-                        <span className="truncate font-medium text-slate-200">
-                          {ec.type === 'solar' ? '☀️ Solar' : '🩸 Lunar'} ({ec.subtype})
-                        </span>
-                        <span className="font-mono text-[9px] text-amber-300 shrink-0 ml-1">
-                          {ec.dateFormatted || `${String(ec.date.getUTCDate()).padStart(2, '0')}-${String(ec.date.getUTCMonth() + 1).padStart(2, '0')}-${ec.date.getUTCFullYear()}`}
-                        </span>
-                      </button>
-                    ))}
+                  <div className="max-h-36 overflow-y-auto space-y-1.5 pr-0.5 scrollbar-thin">
+                    {annualEclipses.map((ec, idx) => {
+                      const matchCat =
+                        ECLIPSE_CATALOG.find((cat) => Math.abs(cat.date.getTime() - ec.date.getTime()) < 3600000 * 24) ||
+                        findMatchingCatalogEclipse(ec.date);
+
+                      const locLabel = matchCat ? `${matchCat.flag} ${matchCat.locationName}` : 'Ponto Central do Eclipse';
+                      const dateStr = ec.dateFormatted || `${String(ec.date.getUTCDate()).padStart(2, '0')}-${String(ec.date.getUTCMonth() + 1).padStart(2, '0')}-${ec.date.getUTCFullYear()}`;
+
+                      return (
+                        <div
+                          key={idx}
+                          className="p-1.5 rounded bg-slate-900 border border-slate-800 hover:border-indigo-500/50 space-y-1 transition text-left"
+                        >
+                          <div className="flex items-center justify-between text-left">
+                            <span className="font-semibold text-[10px] text-slate-200 truncate">
+                              {ec.type === 'solar' ? '☀️ Solar' : '🩸 Lunar'} ({ec.subtype})
+                            </span>
+                            <span className="font-mono text-[9px] text-amber-300 shrink-0 ml-1">
+                              {dateStr}
+                            </span>
+                          </div>
+                          <div className="text-[9px] text-slate-400 truncate flex items-center gap-1">
+                            <MapPin className="w-2.5 h-2.5 text-indigo-400 shrink-0" />
+                            <span className="truncate">{locLabel}</span>
+                          </div>
+                          <div className="flex items-center gap-1 pt-0.5">
+                            <button
+                              onClick={() => handleSelectEclipse(ec, 'human_surface')}
+                              className="flex-1 flex items-center justify-center gap-1 px-1.5 py-0.5 rounded bg-indigo-600/40 hover:bg-indigo-600/70 border border-indigo-400/50 text-[9.5px] font-medium text-indigo-100 transition shadow-sm"
+                              title="Teletransportar para as coordenadas exatas da totalidade e ver o eclipse no céu em Visão Humana"
+                            >
+                              <User className="w-2.5 h-2.5 shrink-0" />
+                              <span>Ver no Céu (Humana)</span>
+                            </button>
+                            <button
+                              onClick={() => handleSelectEclipse(ec, 'orbit')}
+                              className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[9.5px] text-slate-300 transition"
+                              title="Ver o globo terrestre e o cone de sombra do espaço"
+                            >
+                              Globo
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
