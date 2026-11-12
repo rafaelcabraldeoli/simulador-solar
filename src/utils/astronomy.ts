@@ -2,6 +2,7 @@ import { AstroCalculatedState, AstroId, ModelSettings } from '../types';
 import { CELESTIAL_BODIES } from '../data/celestialBodies';
 import { WorldCity, findNearestCity } from '../data/cities';
 import { findMatchingCatalogEclipse } from '../data/eclipses';
+import { calculateLunarOrbitWithNodalPrecession, getContinuousEarthOrbitAngleRad } from './lunarNodalPrecession';
 export { findMatchingCatalogEclipse };
 
 /**
@@ -377,37 +378,81 @@ export function calculateAstroPositions(
   const solarTimeDiffHours = (settings.observerLng - standardMeridianLng) / 15;
   const localSolarHours = hours + solarTimeDiffHours;
 
+  const totalDaysEpoch = (date.getTime() / (1000 * 60 * 60 * 24));
+
+  // Unificação matemática com a Mecânica Celeste Jean Meeus Ch. 47 + Precessão Nodal (18,6 anos):
+  const earthOrbitAngle = getContinuousEarthOrbitAngleRad(date);
+  const lunarTelemetry = calculateLunarOrbitWithNodalPrecession(date, earthOrbitAngle, 60.336);
+
+  const rad = Math.PI / 180;
+  const eps = 23.4392911 * rad;
+
   // 1. SUN CALCULATIONS (Strict Clockwise Diurnal Circuit: Leste -> Sul/Meridiano -> Oeste -> Norte)
   // At solar noon (localSolarHours = 12:00), the Sun is at the observer's exact meridian angle.
   // Clockwise progression at 15° per hour:
   const sunAngleDeg = (90 - settings.observerLng + GLEASON_MAP_ANGLE_OFFSET_DEG) + (localSolarHours - 12) * 15;
   const sunAngleRad = (sunAngleDeg * Math.PI) / 180;
 
-  // Seasonal radial migration between Tropic of Cancer (radius 13.5) and Tropic of Capricorn (radius 22.5)
-  // Equator (radius 18.0) is at the exact center: 18.0 - 4.5 = 13.5, 18.0 + 4.5 = 22.5
-  const seasonalFactor = Math.cos((2 * Math.PI * (dayOfYear - 172)) / 365.25);
-  const sunRadius = 18.0 - 4.5 * seasonalFactor;
+  // Declinação astronômica real do Sol derivada de Meeus:
+  const sunLamRad = lunarTelemetry.sunGeocentricLongitudeDeg * rad;
+  const sinDecSun = Math.sin(eps) * Math.sin(sunLamRad);
+  const decSunDeg = Math.asin(Math.max(-1.0, Math.min(1.0, sinDecSun))) * (180 / Math.PI);
+
+  // No mapa azimuthal equidistante de Gleason, o raio é regido rigorosamente pela Declinação:
+  // Trópico de Câncer (+23.44°): raio 13.31
+  // Equador (0°): raio 18.00
+  // Trópico de Capricórnio (-23.44°): raio 22.69
+  const sunRadius = 18.0 * (1.0 - decSunDeg / 90.0);
+  const seasonalFactor = Math.cos(sunLamRad);
   
   // Vertical altitude calculation:
   const diurnalHourAngle = ((localSolarHours - 12) / 24) * 2 * Math.PI;
   const baseSunY = (((settings.sunDistanceKm || 5000) / 5000) * 18) * 0.5;
-  const sunY = baseSunY + 0.9 * seasonalFactor + 0.45 * Math.cos(diurnalHourAngle);
+  const sunY = baseSunY + 0.9 * (decSunDeg / 23.44) + 0.45 * Math.cos(diurnalHourAngle);
   const sunX = sunRadius * Math.cos(sunAngleRad);
   const sunZ = sunRadius * Math.sin(sunAngleRad); // Clockwise circuit: (x = cos, z = sin)
 
-  // 2. MOON CALCULATIONS (Clockwise with ~50 min daily lag)
-  const totalDaysEpoch = (date.getTime() / (1000 * 60 * 60 * 24));
-  
-  // Calibrated synodic month using known New Moon reference epoch (Jan 11 2024 11:57 UTC)
-  const KNOWN_NEW_MOON_EPOCH = 19733.498;
-  const synodicCycle = 29.530588;
-  const daysSinceNewMoon = totalDaysEpoch - KNOWN_NEW_MOON_EPOCH;
-  const synodicFraction = (((daysSinceNewMoon % synodicCycle) + synodicCycle) % synodicCycle) / synodicCycle;
+  // 2. MOON CALCULATIONS (Mecânica Kepleriana de Alta Precisão Meeus Ch. 47 + Nodos de 5,14°)
+  // Elongação angular real Lua-Sol (0° = Lua Nova / Conjunção / Sizígia):
+  const meeusElongationDeg = ((lunarTelemetry.moonGeocentricLongitudeDeg - lunarTelemetry.sunGeocentricLongitudeDeg + 540) % 360) - 180;
+  const rawMoonAngleDeg = ((sunAngleDeg - meeusElongationDeg) % 360 + 360) % 360;
 
-  let moonAngleDeg = (sunAngleDeg - synodicFraction * 360) % 360;
-  if (moonAngleDeg < 0) moonAngleDeg += 360;
+  // Declinação astronômica geocêntrica da Lua regida pela inclinação fixa de 5,14° e precessão nodal (-19,34°/ano):
+  const moonLamRad = lunarTelemetry.moonGeocentricLongitudeDeg * rad;
+  const moonBetaRad = lunarTelemetry.eclipticLatitudeDeg * rad;
+  const sinDecMoon = Math.sin(eps) * Math.cos(moonBetaRad) * Math.sin(moonLamRad) + Math.cos(eps) * Math.sin(moonBetaRad);
+  const decMoonDeg = Math.asin(Math.max(-1.0, Math.min(1.0, sinDecMoon))) * (180 / Math.PI);
+  const moonNodalFactor = decMoonDeg / 23.44;
 
-  // Check if date matches a catalog eclipse (active window ±3.5 hours)
+  // Paralaxe Topocêntrica Lunar da Superfície Terrestre:
+  // Como a Lua está a ~384.400 km (~60 R_Terra), a visão da superfície terrestre sofre paralaxe topocêntrica
+  // de até ~0.95° que alinha perfeitamente a Lua com o Sol na linha de totalidade dos eclipses:
+  const obsLatRad = settings.observerLat * rad;
+  const decRad = decMoonDeg * rad;
+  const hourAngleH = (diurnalHourAngle);
+  const pi0 = 0.95 * rad; // Paralaxe equatorial horizontal lunar (~57 minutos de arco)
+  const dDec = -pi0 * (Math.sin(obsLatRad) * Math.cos(decRad) - Math.cos(obsLatRad) * Math.sin(decRad) * Math.cos(hourAngleH));
+  const dAlpha = -pi0 * (Math.cos(obsLatRad) * Math.sin(hourAngleH) / Math.cos(decRad));
+
+  const topoDecMoonDeg = decMoonDeg + (dDec * 180 / Math.PI);
+  const moonAngleDeg = ((rawMoonAngleDeg + (dAlpha * 180 / Math.PI)) % 360 + 360) % 360;
+  const moonRadius = 18.0 * (1.0 - topoDecMoonDeg / 90.0);
+
+  // A Lua está posicionada a uma altitude ligeiramente abaixo do Sol (entre a Terra e o Sol):
+  // Altitude base ~8.46 unidades (correspondendo a ~4700 km vs Sol a 5000 km)
+  // Oscilação vertical suave regida pela declinação real:
+  const baseMoonY = baseSunY * 0.94;
+  const moonY = baseMoonY + 0.25 * (decMoonDeg / 23.44) + 0.15 * Math.cos(diurnalHourAngle);
+
+  const moonAngleRad = (moonAngleDeg * Math.PI) / 180;
+  const moonX = moonRadius * Math.cos(moonAngleRad);
+  const moonZ = moonRadius * Math.sin(moonAngleRad); // Clockwise
+
+  // Fase Lunar e Iluminação Exata de Meeus
+  const phaseAngle = lunarTelemetry.synodicPhaseRad;
+  let illuminatedPct = Math.round(lunarTelemetry.illuminatedFraction * 1000) / 10;
+  let phaseName = 'Lua Nova';
+
   const catalogMatch = findMatchingCatalogEclipse(date);
   let isCatalogLunarEclipse = false;
   let isCatalogSolarEclipse = false;
@@ -418,34 +463,16 @@ export function calculateAstroPositions(
     if (absDiff <= 3.5) {
       if (catalogMatch.type === 'lunar') {
         isCatalogLunarEclipse = true;
+      } else if (catalogMatch.type === 'solar') {
+        isCatalogSolarEclipse = true;
       }
     }
   }
-  
-  const moonNodalFactor = Math.sin((totalDaysEpoch / 27.32) * 2 * Math.PI);
-  let moonRadius = 18.0 - 4.5 * moonNodalFactor;
-  
-  // The Moon is consistently positioned at its true celestial altitude just below the Sun (between Earth and Sun)
-  // Base altitude: ~8.46 units (corresponding to ~4700 km vs Sun at 5000 km)
-  const baseMoonY = baseSunY * 0.94;
-  let moonY = baseMoonY + 0.25 * seasonalFactor + 0.15 * Math.cos(diurnalHourAngle);
 
-  let moonAngleRad = (moonAngleDeg * Math.PI) / 180;
-  let moonX = moonRadius * Math.cos(moonAngleRad);
-  let moonZ = moonRadius * Math.sin(moonAngleRad); // Clockwise
-
-  // Moon Phase calculation (angle difference between Sun and Moon)
-  let phaseAngle = ((sunAngleDeg - moonAngleDeg) * Math.PI) / 180;
-  phaseAngle = ((phaseAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-
-  // Phase name & illumination percentage
-  let illuminatedPct = Math.round(((1 - Math.cos(phaseAngle)) / 2) * 1000) / 10;
-  let phaseName = 'Lua Nova';
-  
-  if (isCatalogLunarEclipse) {
+  if (isCatalogLunarEclipse || lunarTelemetry.activeEclipseType === 'lunar_total_or_umbrae') {
     illuminatedPct = 100;
     phaseName = 'Lua Cheia • Lua de Sangue (Eclipse Total)';
-  } else if (isCatalogSolarEclipse) {
+  } else if (isCatalogSolarEclipse || lunarTelemetry.activeEclipseType === 'solar_total_or_annular') {
     illuminatedPct = 0;
     phaseName = 'Lua Nova (Eclipse Solar)';
   } else if (phaseAngle < 0.25 * Math.PI) phaseName = 'Crescente Côncava';
